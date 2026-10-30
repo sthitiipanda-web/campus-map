@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { MapInnerProps } from "./MapInner";
 
 /**
  * Lazy wrapper: the Mapbox GL bundle (and the billable map load) only
@@ -19,10 +20,10 @@ const MapInner = dynamic(() => import("./MapInner"), {
   ),
 });
 
-export function CampusMap() {
+export function CampusMap(props: MapInnerProps) {
   return (
     <div className="absolute inset-0">
-      <MapInner />
+      <MapInner {...props} />
     </div>
   );
 }

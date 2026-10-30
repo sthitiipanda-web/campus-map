@@ -1,0 +1,66 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { Feature, FeatureCollection, Point } from "geojson";
+import type { College, PoiCategory } from "@/lib/config/campus";
+import type { SearchablePoi } from "@/lib/search/score";
+
+export type CampusDataStatus = "loading" | "ready" | "empty" | "error";
+
+interface CampusDataResponse {
+  version: number;
+  pois: FeatureCollection;
+}
+
+function toSearchable(f: Feature): SearchablePoi | null {
+  if (f.geometry?.type !== "Point" || typeof f.id !== "string") return null;
+  const [lon, lat] = (f.geometry as Point).coordinates;
+  const p = f.properties ?? {};
+  if (typeof p.name !== "string" || typeof lon !== "number" || typeof lat !== "number") {
+    return null;
+  }
+  return {
+    id: f.id,
+    name: p.name,
+    aliases: Array.isArray(p.aliases) ? p.aliases.filter((a) => typeof a === "string") : [],
+    college: (p.college as College) ?? "shared",
+    category: (p.category as PoiCategory) ?? "building",
+    lon,
+    lat,
+  };
+}
+
+/** Loads the published campus snapshot once; search runs over it in memory. */
+export function useCampusData(): { pois: SearchablePoi[]; status: CampusDataStatus } {
+  const [pois, setPois] = useState<SearchablePoi[]>([]);
+  const [status, setStatus] = useState<CampusDataStatus>("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/campus-data")
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 404) {
+          setStatus("empty");
+          return;
+        }
+        if (!res.ok) throw new Error(`campus-data ${res.status}`);
+        const data = (await res.json()) as CampusDataResponse;
+        const parsed = (data.pois.features ?? [])
+          .map(toSearchable)
+          .filter((p): p is SearchablePoi => p !== null);
+        if (!cancelled) {
+          setPois(parsed);
+          setStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { pois, status };
+}
