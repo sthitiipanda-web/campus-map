@@ -89,6 +89,89 @@ body {
   border-radius: 2px;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Motion system — small, purposeful, and fully disabled by reduced-motion.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(60%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pin-drop {
+  0% {
+    transform: translateY(-22px) scale(0.7);
+    opacity: 0;
+  }
+  65% {
+    transform: translateY(3px) scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sheet-rise {
+  animation: sheet-rise 0.38s var(--ease-glide) both;
+}
+.pin-drop {
+  animation: pin-drop 0.45s var(--ease-glide) both;
+}
+.fade-up {
+  animation: fade-up 0.28s var(--ease-glide) both;
+}
+
+/* The live-location beacon: a solid dot wearing a breathing halo. */
+.beacon {
+  position: relative;
+}
+.beacon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: pulse-ring 2.2s var(--ease-glide) infinite;
+}
+
+/* Bottom-sheet grab handle */
+.grab-handle {
+  width: 2.25rem;
+  height: 0.3rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-ink-muted) 35%, transparent);
+  margin: 0.5rem auto 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

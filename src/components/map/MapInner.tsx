@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Map, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
+import type { MapMouseEvent } from "mapbox-gl";
+import type { FeatureCollection } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { CAMPUS_BBOX, COLLEGE_ACCENTS, MAP_DEFAULT_VIEW } from "@/lib/config/campus";
 import type { RouteResponse } from "@/lib/routing/route-service";
@@ -10,12 +12,24 @@ import type { SearchablePoi } from "@/lib/search/score";
 const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 const style = process.env.NEXT_PUBLIC_MAPBOX_STYLE ?? "mapbox://styles/mapbox/outdoors-v12";
 
-const ROUTE_COLOR = "#1d5c8f";
+const ROUTE_START = "#35492f"; // parkland-700 — the gradient fades campus-green → college accent
+const DRAW_IN_MS = 1400;
 
 export interface MapInnerProps {
   selected?: SearchablePoi | null;
   route?: RouteResponse | null;
+  /** Published POIs as GeoJSON (id duplicated into properties for hit-testing). */
+  poisFc?: FeatureCollection | null;
+  /** One-shot origin fix shown before walking starts. */
   userLocation?: [number, number] | null;
+  /** Continuous position while walking (beacon + follow camera). */
+  livePosition?: [number, number] | null;
+  heading?: number | null;
+  walking?: boolean;
+  follow?: boolean;
+  onSelectPoi?: (id: string) => void;
+  /** User grabbed the map — parent breaks the follow camera. */
+  onUserPan?: () => void;
 }
 
 function prefersReducedMotion(): boolean {
@@ -24,8 +38,22 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export default function MapInner({ selected, route, userLocation }: MapInnerProps) {
+export default function MapInner({
+  selected,
+  route,
+  poisFc,
+  userLocation,
+  livePosition,
+  heading,
+  walking,
+  follow,
+  onSelectPoi,
+  onUserPan,
+}: MapInnerProps) {
   const mapRef = useRef<MapRef>(null);
+
+  const destinationAccent =
+    (selected ? COLLEGE_ACCENTS[selected.college] : undefined) ?? COLLEGE_ACCENTS.shared;
 
   useEffect(() => {
     if (!selected || route) return;
@@ -58,12 +86,73 @@ export default function MapInner({ selected, route, userLocation }: MapInnerProp
         [maxLon, maxLat],
       ],
       {
-        padding: { top: 120, bottom: 300, left: 48, right: 48 },
+        padding: { top: 100, bottom: 320, left: 48, right: 48 },
         duration: prefersReducedMotion() ? 0 : 1000,
         essential: true,
       },
     );
   }, [route]);
+
+  // Draw the route in from the origin by animating line-trim-offset: the
+  // visible part grows [0 → t] while [t → 1] stays trimmed away.
+  useEffect(() => {
+    if (!route) return;
+    let raf = 0;
+    let start = 0;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+
+    const setTrim = (t: number) => {
+      const trim: [number, number] = [Math.min(t, 1), 1];
+      for (const id of ["route-line", "route-casing"]) {
+        if (map.getLayer(id)) map.setPaintProperty(id, "line-trim-offset", trim);
+      }
+    };
+    const tick = (now: number) => {
+      // The Layer components mount asynchronously; wait until they exist.
+      if (!map.getLayer("route-line")) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      if (prefersReducedMotion()) {
+        setTrim(1);
+        return;
+      }
+      if (!start) start = now;
+      const t = (now - start) / DRAW_IN_MS;
+      // Ease-out so the line glides into the destination.
+      setTrim(1 - Math.pow(1 - Math.min(t, 1), 3));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [route]);
+
+  // Follow camera: glide with the walker, keeping the route ahead readable.
+  useEffect(() => {
+    if (!walking || !follow || !livePosition) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    map.easeTo({
+      center: livePosition,
+      zoom: Math.max(map.getZoom(), 16.5),
+      duration: prefersReducedMotion() ? 0 : 900,
+      essential: true,
+    });
+  }, [walking, follow, livePosition]);
+
+  const handleClick = useCallback(
+    (e: MapMouseEvent) => {
+      const id = e.features?.[0]?.properties?.id;
+      if (typeof id === "string") onSelectPoi?.(id);
+    },
+    [onSelectPoi],
+  );
+
+  const handleMouseMove = useCallback((e: MapMouseEvent) => {
+    const map = mapRef.current?.getMap();
+    if (map) map.getCanvas().style.cursor = e.features?.length ? "pointer" : "";
+  }, []);
 
   if (!token || token.startsWith("pk.REPLACE")) {
     return (
@@ -76,6 +165,8 @@ export default function MapInner({ selected, route, userLocation }: MapInnerProp
       </div>
     );
   }
+
+  const beacon = walking && livePosition ? livePosition : null;
 
   return (
     <Map
@@ -93,29 +184,96 @@ export default function MapInner({ selected, route, userLocation }: MapInnerProp
       maxZoom={19}
       attributionControl={true}
       style={{ width: "100%", height: "100%" }}
+      interactiveLayerIds={["poi-dots"]}
+      onClick={handleClick}
+      onMouseMove={handleMouseMove}
+      onDragStart={onUserPan}
     >
+      {poisFc && (
+        <Source id="pois" type="geojson" data={poisFc}>
+          <Layer
+            id="poi-dots"
+            type="circle"
+            paint={{
+              "circle-color": [
+                "match",
+                ["get", "college"],
+                "digby-stuart",
+                COLLEGE_ACCENTS["digby-stuart"],
+                "froebel",
+                COLLEGE_ACCENTS.froebel,
+                "southlands",
+                COLLEGE_ACCENTS.southlands,
+                "whitelands",
+                COLLEGE_ACCENTS.whitelands,
+                COLLEGE_ACCENTS.shared,
+              ],
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 4, 16, 6, 18, 9],
+              "circle-stroke-color": "#ffffff",
+              "circle-stroke-width": 2,
+            }}
+          />
+          <Layer
+            id="poi-labels"
+            type="symbol"
+            minzoom={15.5}
+            layout={{
+              "text-field": ["get", "name"],
+              "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+              "text-size": 12,
+              "text-offset": [0, 1.1],
+              "text-anchor": "top",
+              "text-optional": true,
+            }}
+            paint={{
+              "text-color": "#22281f",
+              "text-halo-color": "#ffffff",
+              "text-halo-width": 1.2,
+            }}
+          />
+        </Source>
+      )}
+
       {route && (
         <Source
           id="route"
           type="geojson"
+          lineMetrics
           data={{ type: "Feature", properties: {}, geometry: route.geometry }}
         >
           <Layer
             id="route-casing"
             type="line"
             layout={{ "line-cap": "round", "line-join": "round" }}
-            paint={{ "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.9 }}
+            paint={{
+              "line-color": "#ffffff",
+              "line-width": 9,
+              "line-opacity": 0.9,
+              "line-trim-offset": [0, 1],
+            }}
           />
           <Layer
             id="route-line"
             type="line"
             layout={{ "line-cap": "round", "line-join": "round" }}
-            paint={{ "line-color": ROUTE_COLOR, "line-width": 5 }}
+            paint={{
+              "line-width": 5,
+              "line-trim-offset": [0, 1],
+              "line-gradient": [
+                "interpolate",
+                ["linear"],
+                ["line-progress"],
+                0,
+                ROUTE_START,
+                1,
+                destinationAccent,
+              ],
+            }}
           />
         </Source>
       )}
 
-      {userLocation && (
+      {userLocation && !beacon && (
         <Marker longitude={userLocation[0]} latitude={userLocation[1]} anchor="center">
           <span
             aria-hidden="true"
@@ -125,9 +283,31 @@ export default function MapInner({ selected, route, userLocation }: MapInnerProp
         </Marker>
       )}
 
+      {beacon && (
+        <Marker longitude={beacon[0]} latitude={beacon[1]} anchor="center">
+          <span
+            aria-hidden="true"
+            data-testid="user-location-dot"
+            className="beacon relative block h-5 w-5 rounded-full border-[2.5px] border-white bg-[#1d5c8f] text-[#1d5c8f] shadow-md"
+          >
+            {typeof heading === "number" && (
+              <svg
+                width="34"
+                height="34"
+                viewBox="0 0 34 34"
+                className="absolute -left-[9px] -top-[9px]"
+                style={{ transform: `rotate(${heading}deg)` }}
+              >
+                <path d="M17 2l5 9a10 10 0 0 0-10 0l5-9Z" fill="#1d5c8f" opacity="0.45" />
+              </svg>
+            )}
+          </span>
+        </Marker>
+      )}
+
       {selected && (
         <Marker longitude={selected.lon} latitude={selected.lat} anchor="bottom">
-          <div className="flex flex-col items-center" data-testid="selected-poi-marker">
+          <div className="pin-drop flex flex-col items-center" data-testid="selected-poi-marker">
             <span
               className="max-w-48 truncate rounded-full bg-surface-raised/95 px-2.5 py-1 text-small font-medium text-ink shadow"
               aria-hidden="true"
