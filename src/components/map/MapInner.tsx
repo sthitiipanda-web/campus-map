@@ -1,33 +1,69 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Map, { Marker, type MapRef } from "react-map-gl/mapbox";
+import Map, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { CAMPUS_BBOX, COLLEGE_ACCENTS, MAP_DEFAULT_VIEW } from "@/lib/config/campus";
+import type { RouteResponse } from "@/lib/routing/route-service";
 import type { SearchablePoi } from "@/lib/search/score";
 
 const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 const style = process.env.NEXT_PUBLIC_MAPBOX_STYLE ?? "mapbox://styles/mapbox/outdoors-v12";
 
+const ROUTE_COLOR = "#1d5c8f";
+
 export interface MapInnerProps {
   selected?: SearchablePoi | null;
+  route?: RouteResponse | null;
+  userLocation?: [number, number] | null;
 }
 
-export default function MapInner({ selected }: MapInnerProps) {
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+export default function MapInner({ selected, route, userLocation }: MapInnerProps) {
   const mapRef = useRef<MapRef>(null);
 
   useEffect(() => {
-    if (!selected) return;
-    const reduced =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!selected || route) return;
     mapRef.current?.flyTo({
       center: [selected.lon, selected.lat],
       zoom: 17,
-      duration: reduced ? 0 : 1200,
+      duration: prefersReducedMotion() ? 0 : 1200,
       essential: true,
     });
-  }, [selected]);
+  }, [selected, route]);
+
+  // Frame the whole route (origin, path and destination) when one arrives.
+  useEffect(() => {
+    if (!route) return;
+    const coords = route.geometry.coordinates;
+    if (coords.length < 2) return;
+    let minLon = Infinity,
+      minLat = Infinity,
+      maxLon = -Infinity,
+      maxLat = -Infinity;
+    for (const [lon, lat] of coords) {
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    mapRef.current?.fitBounds(
+      [
+        [minLon, minLat],
+        [maxLon, maxLat],
+      ],
+      {
+        padding: { top: 120, bottom: 300, left: 48, right: 48 },
+        duration: prefersReducedMotion() ? 0 : 1000,
+        essential: true,
+      },
+    );
+  }, [route]);
 
   if (!token || token.startsWith("pk.REPLACE")) {
     return (
@@ -58,6 +94,37 @@ export default function MapInner({ selected }: MapInnerProps) {
       attributionControl={true}
       style={{ width: "100%", height: "100%" }}
     >
+      {route && (
+        <Source
+          id="route"
+          type="geojson"
+          data={{ type: "Feature", properties: {}, geometry: route.geometry }}
+        >
+          <Layer
+            id="route-casing"
+            type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
+            paint={{ "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.9 }}
+          />
+          <Layer
+            id="route-line"
+            type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
+            paint={{ "line-color": ROUTE_COLOR, "line-width": 5 }}
+          />
+        </Source>
+      )}
+
+      {userLocation && (
+        <Marker longitude={userLocation[0]} latitude={userLocation[1]} anchor="center">
+          <span
+            aria-hidden="true"
+            data-testid="user-location-dot"
+            className="block h-4 w-4 rounded-full border-2 border-white bg-[#1d5c8f] shadow-[0_0_0_6px_rgba(29,92,143,0.25)]"
+          />
+        </Marker>
+      )}
+
       {selected && (
         <Marker longitude={selected.lon} latitude={selected.lat} anchor="bottom">
           <div className="flex flex-col items-center" data-testid="selected-poi-marker">

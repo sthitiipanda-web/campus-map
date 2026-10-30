@@ -33,7 +33,11 @@ export default auth(async (req) => {
 
   // ── Per-IP rate limits on the API surface (§9/§10) ──────────────────────
   if (pathname.startsWith("/api/")) {
-    const bucket = pathname.startsWith("/api/auth") ? "auth" : "api";
+    const bucket = pathname.startsWith("/api/auth")
+      ? "auth"
+      : pathname.startsWith("/api/route")
+        ? "route"
+        : "api";
     const { limit, windowSeconds } = RATE_LIMITS[bucket];
     const { allowed } = await rateLimit(bucket, clientIp(req), limit, windowSeconds);
     if (!allowed) {

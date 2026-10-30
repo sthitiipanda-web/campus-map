@@ -2,25 +2,32 @@
 
 import { useId, useMemo, useRef, useState } from "react";
 import { COLLEGE_ACCENTS } from "@/lib/config/campus";
+import { labelize } from "@/lib/format";
 import { searchPois, type SearchablePoi } from "@/lib/search/score";
 import type { CampusDataStatus } from "@/hooks/useCampusData";
-
-/** "lecture-theatre" → "Lecture Theatre", "digby-stuart" → "Digby Stuart". */
-function labelize(slug: string): string {
-  return slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 interface SearchBoxProps {
   pois: SearchablePoi[];
   status: CampusDataStatus;
   onSelect: (poi: SearchablePoi) => void;
+  /** Override these to reuse the combobox (e.g. as the route-origin picker). */
+  inputId?: string;
+  label?: string;
+  readyPlaceholder?: string;
 }
 
 /**
  * Accessible combobox over the in-memory POI index (WAI-ARIA combobox
  * pattern). Matching is instant and local — no provider geocoder (§10).
  */
-export function SearchBox({ pois, status, onSelect }: SearchBoxProps) {
+export function SearchBox({
+  pois,
+  status,
+  onSelect,
+  inputId = "poi-search",
+  label = "Search campus buildings and facilities",
+  readyPlaceholder = "Search buildings, cafés, facilities…",
+}: SearchBoxProps) {
   const listboxId = useId();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -67,19 +74,19 @@ export function SearchBox({ pois, status, onSelect }: SearchBoxProps) {
 
   const placeholder =
     status === "ready"
-      ? "Search buildings, cafés, facilities…"
+      ? readyPlaceholder
       : status === "loading"
         ? "Loading campus data…"
         : "Campus data unavailable";
 
   return (
     <div className="relative">
-      <label htmlFor="poi-search" className="sr-only">
-        Search campus buildings and facilities
+      <label htmlFor={inputId} className="sr-only">
+        {label}
       </label>
       <input
         ref={inputRef}
-        id="poi-search"
+        id={inputId}
         type="search"
         role="combobox"
         autoComplete="off"
