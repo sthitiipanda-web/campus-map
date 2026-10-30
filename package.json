@@ -1,0 +1,62 @@
+{
+  "name": "roehampton-campus-navigator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal pedestrian wayfinding app for the University of Roehampton",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "audit:deps": "npm audit --audit-level=high"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "@upstash/redis": "1.40.0",
+    "bcryptjs": "3.0.3",
+    "drizzle-orm": "0.45.4",
+    "mapbox-gl": "3.34.1",
+    "next": "16.4.3",
+    "next-auth": "5.0.0-beta.32",
+    "otplib": "13.5.0",
+    "postgres": "4.0.0",
+    "qrcode": "1.5.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-map-gl": "8.1.3",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.7",
+    "@playwright/test": "1.64.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/bcryptjs": "3.0.0",
+    "@types/geojson": "7946.0.16",
+    "@types/node": "26.6.6",
+    "@types/qrcode": "1.5.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "dotenv": "18.0.9",
+    "drizzle-kit": "0.31.11",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.3",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "postcss": "8.5.32",
+    "prettier": "3.9.10",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "3.2.7"
+  }
+}

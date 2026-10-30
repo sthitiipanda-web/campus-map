@@ -1,0 +1,37 @@
+import type { Metadata, Viewport } from "next";
+import { Instrument_Sans } from "next/font/google";
+import "./globals.css";
+
+// Placeholder typeface until the licensed-typeface decision (design direction §11).
+const instrument = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-instrument",
+  display: "swap",
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: "Roehampton Campus Navigator",
+    template: "%s · Roehampton Campus Navigator",
+  },
+  description:
+    "On-foot wayfinding across the University of Roehampton parkland campus: buildings, step-free routes and campus facilities.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf7f0" },
+    { media: "(prefers-color-scheme: dark)", color: "#161b14" },
+  ],
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en-GB" className={instrument.variable}>
+      <body>{children}</body>
+    </html>
+  );
+}

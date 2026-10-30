@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Roehampton Campus Navigator — design tokens
+   A parkland palette: deep greens, soft water blues, warm heritage stone.
+   College accents mirror src/lib/config/campus.ts — keep both in sync.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Core palette */
+  --color-parkland-50: #f3f6f1;
+  --color-parkland-100: #e2eadd;
+  --color-parkland-200: #c4d5bb;
+  --color-parkland-500: #4f6b4a;
+  --color-parkland-700: #35492f;
+  --color-parkland-900: #1f2b1c;
+
+  --color-water-100: #dcebf0;
+  --color-water-400: #6fa8bc;
+  --color-water-600: #3f7a92;
+
+  --color-stone-50: #faf7f0;
+  --color-stone-100: #f1ebdd;
+  --color-stone-300: #d8cbb0;
+  --color-stone-600: #8a7a5c;
+  --color-stone-900: #332d22;
+
+  /* College accents */
+  --color-digby: #b5502e;
+  --color-froebel: #c9961a;
+  --color-southlands: #4a6b8a;
+  --color-whitelands: #5a7d4f;
+  --color-shared: #3e4a3d;
+
+  /* Semantic tokens */
+  --color-surface: var(--color-stone-50);
+  --color-surface-raised: #ffffff;
+  --color-ink: #22281f;
+  --color-ink-muted: #5c6457;
+  --color-accent: var(--color-parkland-500);
+  --color-focus: #1f6feb;
+  --color-danger: #b4232a;
+
+  /* Type scale (distinctive humanist sans wired in layout.tsx via next/font) */
+  --font-sans: var(--font-instrument), system-ui, sans-serif;
+  --text-display: 2.25rem;
+  --text-title: 1.375rem;
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+
+  /* Space & shape */
+  --spacing: 0.25rem;
+  --radius-sheet: 1.25rem;
+  --radius-control: 0.75rem;
+
+  /* Motion — respect prefers-reduced-motion everywhere */
+  --ease-glide: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Dark mode for evening walks: media default + explicit override hook */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-surface: #161b14;
+    --color-surface-raised: #212822;
+    --color-ink: #e8ece4;
+    --color-ink-muted: #a3ab9c;
+    --color-accent: #8fae87;
+  }
+}
+:root[data-theme="dark"] {
+  --color-surface: #161b14;
+  --color-surface-raised: #212822;
+  --color-ink: #e8ece4;
+  --color-ink-muted: #a3ab9c;
+  --color-accent: #8fae87;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Outdoor legibility: strong focus states for keyboard users (WCAG 2.2) */
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

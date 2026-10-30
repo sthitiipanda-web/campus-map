@@ -1,0 +1,16 @@
+# Local development infrastructure. Redis is NOT required locally — the app
+# falls back to an in-memory cache when UPSTASH_* env vars are unset.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: campus
+      POSTGRES_PASSWORD: campus
+      POSTGRES_DB: campus_map
+    ports:
+      - "5432:5432"
+    volumes:
+      - campus_pgdata:/var/lib/postgresql/data
+
+volumes:
+  campus_pgdata:

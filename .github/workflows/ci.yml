@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values so build/typecheck run without real secrets. The map
+      # renders its "token not configured" state; no provider is called.
+      NEXT_PUBLIC_MAPBOX_TOKEN: pk.REPLACE_ME
+      DATABASE_URL: postgres://campus:campus@localhost:5432/campus_map
+      AUTH_SECRET: ci-only-dummy-secret-not-used-in-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - name: Dependency audit (fail on high/critical)
+        run: npm audit --audit-level=high
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_MAPBOX_TOKEN: pk.REPLACE_ME
+      DATABASE_URL: postgres://campus:campus@localhost:5432/campus_map
+      AUTH_SECRET: ci-only-dummy-secret-not-used-in-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
