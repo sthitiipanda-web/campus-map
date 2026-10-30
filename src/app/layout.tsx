@@ -31,7 +31,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en-GB" className={instrument.variable}>
-      <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions (e.g. Grammarly) inject
+          attributes into <body> before hydration; attribute-only mismatches
+          are expected and safe to ignore. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }
