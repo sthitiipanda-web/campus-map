@@ -40,7 +40,7 @@ function insideCampus([lon, lat]: [number, number]): boolean {
  * device (UK GDPR, §12).
  */
 export function MapShell() {
-  const { pois, status } = useCampusData();
+  const { pois, terrain, status } = useCampusData();
   const [mode, setMode] = useState<Mode>("idle");
   const [selected, setSelected] = useState<SearchablePoi | null>(null);
   const [route, setRoute] = useState<RouteResponse | null>(null);
@@ -204,6 +204,7 @@ export function MapShell() {
         selected={selected}
         route={mode === "route" ? route : null}
         poisFc={poisFc}
+        terrainFc={terrain}
         userLocation={staticLocation}
         livePosition={live.position}
         heading={live.heading}

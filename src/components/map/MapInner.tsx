@@ -22,6 +22,22 @@ const DARK_STYLE = process.env.NEXT_PUBLIC_MAPBOX_STYLE_DARK ?? "mapbox://styles
 const ROUTE_START = "#35492f"; // parkland-700 — the gradient fades campus-green → college accent
 const DRAW_IN_MS = 1400;
 
+/* Terrain palette — the campus itself is painted vividly from our own OSM
+   data while the basemap around it stays muted, so the campus reads like an
+   illustrated map. Each kind has a light/dark pair. */
+const TERRAIN = {
+  grass: ["#d6e7c3", "#202b1a"],
+  garden: ["#cbe2b6", "#25311d"],
+  pitch: ["#bfdec6", "#1f3125"],
+  wood: ["#adcf94", "#2b3b21"],
+  scrub: ["#bed9a7", "#27361f"],
+  water: ["#a9cfe4", "#17303e"],
+  buildingFill: ["#ebe3d1", "#31362c"],
+  buildingLine: ["#cfc2a3", "#49523f"],
+  tree: ["#5f8f4b", "#4e6b3c"],
+} as const;
+const terrainColor = (k: keyof typeof TERRAIN, dark: boolean) => TERRAIN[k][dark ? 1 : 0];
+
 const subscribeScheme = (cb: () => void) => {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   mq.addEventListener("change", cb);
@@ -35,6 +51,8 @@ export interface MapInnerProps {
   route?: RouteResponse | null;
   /** Published POIs as GeoJSON (id duplicated into properties for hit-testing). */
   poisFc?: FeatureCollection | null;
+  /** Decorative terrain from the snapshot: footprints, greenery, water, trees. */
+  terrainFc?: FeatureCollection | null;
   /** One-shot origin fix shown before walking starts. */
   userLocation?: [number, number] | null;
   /** Continuous position while walking (beacon + follow camera). */
@@ -57,6 +75,7 @@ export default function MapInner({
   selected,
   route,
   poisFc,
+  terrainFc,
   userLocation,
   livePosition,
   heading,
@@ -224,6 +243,66 @@ export default function MapInner({
       onMouseMove={handleMouseMove}
       onDragStart={onUserPan}
     >
+      {terrainFc && (
+        <Source id="terrain" type="geojson" data={terrainFc}>
+          {/* Greenery first, then water, then buildings — so footprints sit on lawns. */}
+          <Layer
+            id="terrain-green"
+            type="fill"
+            filter={[
+              "match",
+              ["get", "kind"],
+              ["grass", "garden", "pitch", "wood", "scrub"],
+              true,
+              false,
+            ]}
+            paint={{
+              "fill-color": [
+                "match",
+                ["get", "kind"],
+                "grass",
+                terrainColor("grass", isDark),
+                "garden",
+                terrainColor("garden", isDark),
+                "pitch",
+                terrainColor("pitch", isDark),
+                "wood",
+                terrainColor("wood", isDark),
+                terrainColor("scrub", isDark),
+              ],
+            }}
+          />
+          <Layer
+            id="terrain-water"
+            type="fill"
+            filter={["==", ["get", "kind"], "water"]}
+            paint={{ "fill-color": terrainColor("water", isDark) }}
+          />
+          <Layer
+            id="terrain-buildings"
+            type="fill"
+            filter={["==", ["get", "kind"], "building"]}
+            paint={{ "fill-color": terrainColor("buildingFill", isDark) }}
+          />
+          <Layer
+            id="terrain-building-outlines"
+            type="line"
+            filter={["==", ["get", "kind"], "building"]}
+            paint={{ "line-color": terrainColor("buildingLine", isDark), "line-width": 1 }}
+          />
+          <Layer
+            id="terrain-trees"
+            type="circle"
+            filter={["==", ["get", "kind"], "tree"]}
+            paint={{
+              "circle-color": terrainColor("tree", isDark),
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 1.2, 16, 2.4, 18, 4.5],
+              "circle-opacity": 0.8,
+            }}
+          />
+        </Source>
+      )}
+
       {poisFc && (
         <Source id="pois" type="geojson" data={poisFc}>
           <Layer
@@ -249,13 +328,15 @@ export default function MapInner({
             }}
           />
           <Layer
-            id="poi-labels"
+            // Not "poi-labels": the basemap declutter regex (/poi-label/)
+            // would match and hide our own layer.
+            id="campus-labels"
             type="symbol"
-            minzoom={15.5}
+            minzoom={14}
             layout={{
               "text-field": ["get", "name"],
               "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
-              "text-size": 12,
+              "text-size": ["interpolate", ["linear"], ["zoom"], 14, 10.5, 16, 12, 18, 13.5],
               "text-offset": [0, 1.1],
               "text-anchor": "top",
               "text-optional": true,

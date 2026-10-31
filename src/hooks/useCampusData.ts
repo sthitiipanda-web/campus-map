@@ -10,6 +10,8 @@ export type CampusDataStatus = "loading" | "ready" | "empty" | "error";
 interface CampusDataResponse {
   version: number;
   pois: FeatureCollection;
+  /** Decorative terrain (footprints, greenery, water, trees); absent in snapshots before v4. */
+  terrain?: FeatureCollection;
 }
 
 function toSearchable(f: Feature): SearchablePoi | null {
@@ -31,8 +33,13 @@ function toSearchable(f: Feature): SearchablePoi | null {
 }
 
 /** Loads the published campus snapshot once; search runs over it in memory. */
-export function useCampusData(): { pois: SearchablePoi[]; status: CampusDataStatus } {
+export function useCampusData(): {
+  pois: SearchablePoi[];
+  terrain: FeatureCollection | null;
+  status: CampusDataStatus;
+} {
   const [pois, setPois] = useState<SearchablePoi[]>([]);
+  const [terrain, setTerrain] = useState<FeatureCollection | null>(null);
   const [status, setStatus] = useState<CampusDataStatus>("loading");
 
   useEffect(() => {
@@ -51,6 +58,7 @@ export function useCampusData(): { pois: SearchablePoi[]; status: CampusDataStat
           .filter((p): p is SearchablePoi => p !== null);
         if (!cancelled) {
           setPois(parsed);
+          setTerrain(data.terrain?.type === "FeatureCollection" ? data.terrain : null);
           setStatus("ready");
         }
       })
@@ -62,5 +70,5 @@ export function useCampusData(): { pois: SearchablePoi[]; status: CampusDataStat
     };
   }, []);
 
-  return { pois, status };
+  return { pois, terrain, status };
 }

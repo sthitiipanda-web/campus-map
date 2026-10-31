@@ -71,3 +71,19 @@ export type EdgeType = (typeof EDGE_TYPES)[number];
 
 export const NODE_TYPES = ["junction", "entrance", "stop"] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
+
+/**
+ * Decorative terrain layers (building footprints, greenery, water, trees) —
+ * purely visual context under the wayfinding data; never routed or searched.
+ */
+export const TERRAIN_KINDS = [
+  "building",
+  "grass",
+  "garden",
+  "wood",
+  "scrub",
+  "water",
+  "pitch",
+  "tree",
+] as const;
+export type TerrainKind = (typeof TERRAIN_KINDS)[number];

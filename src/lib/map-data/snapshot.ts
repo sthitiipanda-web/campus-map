@@ -9,6 +9,8 @@ export interface CampusSnapshot {
   entrances: FeatureCollection;
   nodes: FeatureCollection;
   edges: FeatureCollection;
+  /** Decorative terrain (footprints, greenery, water, trees); absent in snapshots before v4. */
+  terrain?: FeatureCollection;
 }
 
 /**
@@ -17,7 +19,7 @@ export interface CampusSnapshot {
  * row; the public app only ever reads the latest row — atomic by design (§8).
  */
 export async function buildSnapshot(): Promise<Omit<CampusSnapshot, "version" | "publishedAt">> {
-  const [pois, entrances, nodes, edges] = await Promise.all([
+  const [pois, entrances, nodes, edges, terrain] = await Promise.all([
     db.execute(sql`
       SELECT jsonb_build_object(
         'type','FeatureCollection',
@@ -80,12 +82,31 @@ export async function buildSnapshot(): Promise<Omit<CampusSnapshot, "version" | 
       ) AS fc
       FROM path_edges WHERE deleted_at IS NULL
     `),
+    db.execute(sql`
+      SELECT jsonb_build_object(
+        'type','FeatureCollection',
+        'features', coalesce(jsonb_agg(jsonb_build_object(
+          'type','Feature',
+          'id', id,
+          'geometry', ST_AsGeoJSON(coalesce(polygon, point))::jsonb,
+          'properties', jsonb_build_object('kind', kind, 'name', name)
+        )), '[]'::jsonb)
+      ) AS fc
+      FROM terrain_features
+      WHERE deleted_at IS NULL AND coalesce(polygon, point) IS NOT NULL
+    `),
   ]);
 
   const fc = (rows: unknown): FeatureCollection =>
     (rows as Array<{ fc: FeatureCollection }>)[0]!.fc;
 
-  return { pois: fc(pois), entrances: fc(entrances), nodes: fc(nodes), edges: fc(edges) };
+  return {
+    pois: fc(pois),
+    entrances: fc(entrances),
+    nodes: fc(nodes),
+    edges: fc(edges),
+    terrain: fc(terrain),
+  };
 }
 
 /** Publish: store a new immutable snapshot version. Returns its id. */

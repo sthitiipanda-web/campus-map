@@ -10,7 +10,13 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { COLLEGES, EDGE_TYPES, NODE_TYPES, POI_CATEGORIES } from "@/lib/config/campus";
+import {
+  COLLEGES,
+  EDGE_TYPES,
+  NODE_TYPES,
+  POI_CATEGORIES,
+  TERRAIN_KINDS,
+} from "@/lib/config/campus";
 
 /* PostGIS geometry columns. Values are written as EWKT strings (see
    src/lib/validation/geo.ts) and read back via explicit ST_AsGeoJSON in raw
@@ -25,6 +31,7 @@ export const poiCategoryEnum = pgEnum("poi_category", POI_CATEGORIES);
 export const edgeTypeEnum = pgEnum("edge_type", EDGE_TYPES);
 export const nodeTypeEnum = pgEnum("node_type", NODE_TYPES);
 export const contentStatusEnum = pgEnum("content_status", ["draft", "published"]);
+export const terrainKindEnum = pgEnum("terrain_kind", TERRAIN_KINDS);
 export const adminRoleEnum = pgEnum("admin_role", ["editor", "admin", "super-admin"]);
 
 /* ── Campus knowledge layer (working copy; public reads use snapshots) ──── */
@@ -79,6 +86,19 @@ export const pathEdges = pgTable("path_edges", {
   type: edgeTypeEnum("type").notNull().default("path"),
   accessible: boolean("accessible").notNull().default(true),
   weightMultiplier: real("weight_multiplier").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+/* Decorative terrain (building footprints, lawns, woods, water, trees):
+   visual context only — never routed or searched. Polygon features fill
+   `polygon`; point features (trees) fill `point`; exactly one is set. */
+export const terrainFeatures = pgTable("terrain_features", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: terrainKindEnum("kind").notNull(),
+  name: text("name"),
+  polygon: geometry("Polygon")("polygon"),
+  point: geometry("Point")("point"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
