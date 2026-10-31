@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import Map, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import type { MapMouseEvent } from "mapbox-gl";
 import type { FeatureCollection } from "geojson";
@@ -10,10 +10,25 @@ import type { RouteResponse } from "@/lib/routing/route-service";
 import type { SearchablePoi } from "@/lib/search/score";
 
 const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-const style = process.env.NEXT_PUBLIC_MAPBOX_STYLE ?? "mapbox://styles/mapbox/outdoors-v12";
+
+// Minimal, decluttered basemaps that follow the device colour scheme. A
+// bespoke Mapbox Studio style can override either without a code change.
+const LIGHT_STYLE =
+  process.env.NEXT_PUBLIC_MAPBOX_STYLE_LIGHT ??
+  process.env.NEXT_PUBLIC_MAPBOX_STYLE ??
+  "mapbox://styles/mapbox/light-v11";
+const DARK_STYLE = process.env.NEXT_PUBLIC_MAPBOX_STYLE_DARK ?? "mapbox://styles/mapbox/dark-v11";
 
 const ROUTE_START = "#35492f"; // parkland-700 — the gradient fades campus-green → college accent
 const DRAW_IN_MS = 1400;
+
+const subscribeScheme = (cb: () => void) => {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+const readScheme = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
+const serverScheme = () => false;
 
 export interface MapInnerProps {
   selected?: SearchablePoi | null;
@@ -51,6 +66,24 @@ export default function MapInner({
   onUserPan,
 }: MapInnerProps) {
   const mapRef = useRef<MapRef>(null);
+  const isDark = useSyncExternalStore(subscribeScheme, readScheme, serverScheme);
+
+  // Hide the basemap's own POI/transit labels: they aren't searchable, so
+  // every label the user sees should be one of ours. Idempotent — re-runs
+  // whenever the style (re)loads.
+  const declutterBasemap = useCallback(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    try {
+      for (const layer of map.getStyle()?.layers ?? []) {
+        if (layer.type === "symbol" && /poi-label|transit|airport-label/.test(layer.id)) {
+          map.setLayoutProperty(layer.id, "visibility", "none");
+        }
+      }
+    } catch {
+      // Style mid-swap — the next styledata event re-applies this.
+    }
+  }, []);
 
   const destinationAccent =
     (selected ? COLLEGE_ACCENTS[selected.college] : undefined) ?? COLLEGE_ACCENTS.shared;
@@ -172,8 +205,10 @@ export default function MapInner({
     <Map
       ref={mapRef}
       mapboxAccessToken={token}
-      mapStyle={style}
+      mapStyle={isDark ? DARK_STYLE : LIGHT_STYLE}
       initialViewState={MAP_DEFAULT_VIEW}
+      onLoad={declutterBasemap}
+      onStyleData={declutterBasemap}
       // Keep the camera on campus: pan/zoom outside the envelope is pointless
       // and every wasted tile request costs money (§10).
       maxBounds={[
@@ -226,8 +261,8 @@ export default function MapInner({
               "text-optional": true,
             }}
             paint={{
-              "text-color": "#22281f",
-              "text-halo-color": "#ffffff",
+              "text-color": isDark ? "#e8ece4" : "#22281f",
+              "text-halo-color": isDark ? "#161b14" : "#ffffff",
               "text-halo-width": 1.2,
             }}
           />
@@ -246,7 +281,7 @@ export default function MapInner({
             type="line"
             layout={{ "line-cap": "round", "line-join": "round" }}
             paint={{
-              "line-color": "#ffffff",
+              "line-color": isDark ? "#161b14" : "#ffffff",
               "line-width": 9,
               "line-opacity": 0.9,
               "line-trim-offset": [0, 1],
