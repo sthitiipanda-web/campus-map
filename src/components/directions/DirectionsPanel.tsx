@@ -1,10 +1,10 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { StepIcon } from "@/components/directions/StepIcon";
 import { formatDistance, formatDuration } from "@/lib/format";
 import { WALK_SPEED_MPS } from "@/lib/config/campus";
+import { activeStep } from "@/lib/routing/directions";
 import type { RouteProgress } from "@/lib/routing/progress";
-import type { RouteStep } from "@/lib/routing/directions";
 import type { RouteResponse } from "@/lib/routing/route-service";
 
 interface DirectionsPanelProps {
@@ -21,79 +21,14 @@ interface DirectionsPanelProps {
   locationError: "denied" | "unavailable" | null;
   /** Walking available at all (geo origin / secure context). */
   canWalk: boolean;
+  /** Spoken guidance preference + capability (Web Speech API, on-device). */
+  voiceOn: boolean;
+  supportsVoice: boolean;
+  onToggleVoice: (on: boolean) => void;
   onToggleStepFree: (stepFree: boolean) => void;
   onStartWalking: () => void;
   onReRoute: () => void;
   onClose: () => void;
-}
-
-function stepIcon(step: RouteStep): ReactElement {
-  const common = {
-    width: 16,
-    height: 16,
-    viewBox: "0 0 16 16",
-    "aria-hidden": true as const,
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.6,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
-  switch (step.type) {
-    case "arrive":
-      return (
-        <svg {...common}>
-          <path d="M4 15V2m0 0h8l-2 3 2 3H4" />
-        </svg>
-      );
-    case "stairs":
-      return (
-        <svg {...common}>
-          <path d="M1 14h4v-4h4V6h4V2h2" />
-        </svg>
-      );
-    case "lift":
-      return (
-        <svg {...common}>
-          <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" />
-          <path d="M6 7L8 4.5 10 7M6 10l2 2.5 2-2.5" />
-        </svg>
-      );
-    case "ramp":
-      return (
-        <svg {...common}>
-          <path d="M1 13L15 5M1 13h14" />
-        </svg>
-      );
-    case "road-crossing":
-      return (
-        <svg {...common}>
-          <path d="M8 1.5v2M8 6v2M8 10.5v2M1 14.5h14M1 1.5h14" />
-        </svg>
-      );
-    default: {
-      const i = step.instruction.toLowerCase();
-      if (i.startsWith("turn left") || i.startsWith("bear left")) {
-        return (
-          <svg {...common}>
-            <path d="M12 14V8a3 3 0 0 0-3-3H3m0 0l3-3M3 5l3 3" />
-          </svg>
-        );
-      }
-      if (i.startsWith("turn right") || i.startsWith("bear right")) {
-        return (
-          <svg {...common}>
-            <path d="M4 14V8a3 3 0 0 1 3-3h6m0 0l-3-3m3 3l-3 3" />
-          </svg>
-        );
-      }
-      return (
-        <svg {...common}>
-          <path d="M8 14V2m0 0L4.5 5.5M8 2l3.5 3.5" />
-        </svg>
-      );
-    }
-  }
 }
 
 /**
@@ -110,6 +45,9 @@ export function DirectionsPanel({
   offRoute,
   locationError,
   canWalk,
+  voiceOn,
+  supportsVoice,
+  onToggleVoice,
   onToggleStepFree,
   onStartWalking,
   onReRoute,
@@ -119,6 +57,7 @@ export function DirectionsPanel({
   const liveSeconds =
     walking && progress ? progress.remainingMeters / WALK_SPEED_MPS : route.durationSeconds;
   const nearlyThere = walking && progress !== null && progress.remainingMeters < 20;
+  const act = walking && progress ? activeStep(route.steps, progress.traveledMeters) : null;
 
   return (
     <section
@@ -181,17 +120,31 @@ export function DirectionsPanel({
 
       {!walking && (
         <div className="flex items-center justify-between gap-3 px-4 pb-3">
-          <label htmlFor="step-free" className="flex items-center gap-2 text-small text-ink">
-            <input
-              id="step-free"
-              type="checkbox"
-              checked={stepFree}
-              disabled={busy}
-              onChange={(e) => onToggleStepFree(e.target.checked)}
-              className="h-4 w-4 accent-parkland-900"
-            />
-            Step-free route (avoid stairs)
-          </label>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <label htmlFor="step-free" className="flex items-center gap-2 text-small text-ink">
+              <input
+                id="step-free"
+                type="checkbox"
+                checked={stepFree}
+                disabled={busy}
+                onChange={(e) => onToggleStepFree(e.target.checked)}
+                className="h-4 w-4 accent-parkland-900"
+              />
+              Step-free route (avoid stairs)
+            </label>
+            {supportsVoice && (
+              <label htmlFor="voice-guidance" className="flex items-center gap-2 text-small text-ink">
+                <input
+                  id="voice-guidance"
+                  type="checkbox"
+                  checked={voiceOn}
+                  onChange={(e) => onToggleVoice(e.target.checked)}
+                  className="h-4 w-4 accent-parkland-900"
+                />
+                Voice guidance (speaks each turn)
+              </label>
+            )}
+          </div>
           {canWalk && (
             <button
               type="button"
@@ -220,27 +173,62 @@ export function DirectionsPanel({
         </p>
       )}
 
+      {route.destination.arrival === "path" && !walking && (
+        <p role="status" className="px-4 pb-2 text-small text-ink-muted">
+          Ends on the path nearest the building — its entrance isn’t mapped yet.
+        </p>
+      )}
+
       <ol className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1">
-        {route.steps.map((step, i) => (
-          <li key={i} className="flex items-center gap-3 py-1.5 text-body text-ink">
-            <span
-              aria-hidden="true"
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-                step.type === "arrive"
-                  ? "bg-parkland-900 text-white"
-                  : "bg-parkland-100 text-parkland-900"
+        {route.steps.map((step, i) => {
+          const isDone = act !== null && i < act.index;
+          const isActive = act !== null && i === act.index;
+          return (
+            <li
+              key={i}
+              aria-current={isActive ? "step" : undefined}
+              className={`flex items-center gap-3 rounded-(--radius-control) py-1.5 text-body ${
+                isActive
+                  ? "bg-parkland-100/70 px-2 font-medium text-ink dark:bg-stone-800/70"
+                  : isDone
+                    ? "text-ink-muted opacity-60"
+                    : "text-ink"
               }`}
             >
-              {stepIcon(step)}
-            </span>
-            <span className="min-w-0 flex-1">{step.instruction}</span>
-            {step.distanceMeters > 0 && (
-              <span className="shrink-0 text-small tabular-nums text-ink-muted">
-                {formatDistance(step.distanceMeters)}
+              <span
+                aria-hidden="true"
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                  isActive || step.type === "arrive"
+                    ? "bg-parkland-900 text-white"
+                    : "bg-parkland-100 text-parkland-900"
+                }`}
+              >
+                {isDone ? (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M2.5 8.5l4 4L13.5 4" />
+                  </svg>
+                ) : (
+                  <StepIcon step={step} />
+                )}
               </span>
-            )}
-          </li>
-        ))}
+              <span className="min-w-0 flex-1">{step.instruction}</span>
+              {step.distanceMeters > 0 && (
+                <span className="shrink-0 text-small tabular-nums text-ink-muted">
+                  {formatDistance(step.distanceMeters)}
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </section>
   );

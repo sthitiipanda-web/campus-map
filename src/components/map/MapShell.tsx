@@ -4,11 +4,13 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import type { FeatureCollection } from "geojson";
 import { CampusMap } from "@/components/map/CampusMap";
 import { DirectionsPanel } from "@/components/directions/DirectionsPanel";
+import { WalkHud } from "@/components/directions/WalkHud";
 import { OriginSheet } from "@/components/sheets/OriginSheet";
 import { PoiSheet } from "@/components/sheets/PoiSheet";
 import { SearchBox } from "@/components/search/SearchBox";
 import { useCampusData } from "@/hooks/useCampusData";
 import { useLiveLocation } from "@/hooks/useLiveLocation";
+import { useSpeechSupported } from "@/hooks/useVoiceGuidance";
 import { CAMPUS_BBOX } from "@/lib/config/campus";
 import { OFF_ROUTE_METERS, routeProgress } from "@/lib/routing/progress";
 import type { RouteResponse } from "@/lib/routing/route-service";
@@ -51,7 +53,9 @@ export function MapShell() {
   const [walking, setWalking] = useState(false);
   const [follow, setFollow] = useState(false);
   const [staticLocation, setStaticLocation] = useState<[number, number] | null>(null);
+  const [voiceOn, setVoiceOn] = useState(false);
   const canWalk = useSyncExternalStore(noopSubscribe, hasGeolocation, noGeolocation);
+  const supportsVoice = useSpeechSupported();
 
   const live = useLiveLocation(walking);
 
@@ -227,6 +231,17 @@ export function MapShell() {
         </div>
       )}
 
+      {walking && route && (
+        <WalkHud
+          route={route}
+          progress={progress}
+          offRoute={offRoute}
+          voiceOn={voiceOn}
+          supportsVoice={supportsVoice}
+          onToggleVoice={() => setVoiceOn((v) => !v)}
+        />
+      )}
+
       {walking && !follow && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[calc(55dvh+1rem)] z-20 flex justify-end px-4">
           <button
@@ -290,6 +305,9 @@ export function MapShell() {
             offRoute={offRoute}
             locationError={live.error}
             canWalk={canWalk}
+            voiceOn={voiceOn}
+            supportsVoice={supportsVoice}
+            onToggleVoice={setVoiceOn}
             onToggleStepFree={toggleStepFree}
             onStartWalking={startWalking}
             onReRoute={reRoute}
