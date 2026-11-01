@@ -98,3 +98,26 @@ export function buildSteps(
   });
   return steps;
 }
+
+export interface ActiveStep {
+  /** Index into the steps array of the step the walker is currently on. */
+  index: number;
+  /** Metres until this step ends and the next instruction applies. */
+  metersLeftInStep: number;
+}
+
+/**
+ * Locate the walker within the step list from distance already covered.
+ * Step distances are walked cumulatively; once every metred step is spent,
+ * the walker is on the final (arrive) step.
+ */
+export function activeStep(steps: RouteStep[], traveledMeters: number): ActiveStep {
+  let cumulative = 0;
+  for (let i = 0; i < steps.length; i++) {
+    cumulative += steps[i]!.distanceMeters;
+    if (traveledMeters < cumulative || steps[i]!.type === "arrive") {
+      return { index: i, metersLeftInStep: Math.max(0, Math.round(cumulative - traveledMeters)) };
+    }
+  }
+  return { index: Math.max(0, steps.length - 1), metersLeftInStep: 0 };
+}

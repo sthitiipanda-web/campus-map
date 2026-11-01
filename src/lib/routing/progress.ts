@@ -3,6 +3,8 @@ import { haversineMeters } from "./geo-math";
 export interface RouteProgress {
   /** Metres left along the route from the walker's projected position. */
   remainingMeters: number;
+  /** Metres already covered along the route (projected). */
+  traveledMeters: number;
   /** How far the walker stands from the route itself. */
   offRouteMeters: number;
 }
@@ -46,7 +48,8 @@ export function routeProgress(
   }
   if (!best) return null;
 
-  // Remaining = rest of the matched segment + every segment after it.
+  // Remaining = rest of the matched segment + every segment after it;
+  // traveled = every segment before it + the covered part of it.
   const segStart = coords[best.seg]!;
   const segEnd = coords[best.seg + 1]!;
   const segLen = haversineMeters(segStart, segEnd);
@@ -54,9 +57,14 @@ export function routeProgress(
   for (let i = best.seg + 1; i < coords.length - 1; i++) {
     remaining += haversineMeters(coords[i]!, coords[i + 1]!);
   }
+  let traveled = segLen * best.t;
+  for (let i = 0; i < best.seg; i++) {
+    traveled += haversineMeters(coords[i]!, coords[i + 1]!);
+  }
 
   return {
     remainingMeters: Math.round(remaining),
+    traveledMeters: Math.round(traveled),
     offRouteMeters: Math.round(Math.sqrt(best.distSq)),
   };
 }

@@ -170,6 +170,70 @@ describe("computeRoute", () => {
   });
 });
 
+describe("arrival semantics", () => {
+  // Door ~55m north of node C — the walk should end AT the door.
+  const DOOR: [number, number] = [-0.243, 51.4575];
+  const withOffsetDoor: CampusSnapshot = {
+    ...snapshot,
+    entrances: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "e1",
+          geometry: { type: "Point", coordinates: DOOR },
+          properties: {
+            locationId: POI_ID,
+            name: "SEED – Main entrance",
+            stepFree: true,
+            nodeId: "C",
+          },
+        },
+      ],
+    },
+  };
+
+  it("ends the route at the mapped entrance door", () => {
+    const route = computeRoute(withOffsetDoor, {
+      from: { kind: "coord", lonLat: A },
+      to: { kind: "poi", id: POI_ID },
+      stepFree: false,
+    });
+    expect(route.destination.arrival).toBe("entrance");
+    expect(route.destination.entranceName).toBe("SEED – Main entrance");
+    expect([route.destination.lon, route.destination.lat]).toEqual(DOOR);
+    expect(route.geometry.coordinates.at(-1)).toEqual(DOOR);
+    expect(route.steps.at(-1)?.instruction).toContain("SEED – Main entrance");
+  });
+
+  it("falls back to the nearest path and says so when no entrance is mapped", () => {
+    const noEntrances: CampusSnapshot = {
+      ...snapshot,
+      entrances: { type: "FeatureCollection", features: [] },
+    };
+    const route = computeRoute(noEntrances, {
+      from: { kind: "coord", lonLat: A },
+      to: { kind: "poi", id: POI_ID },
+      stepFree: false,
+    });
+    expect(route.destination.arrival).toBe("path");
+    expect(route.destination.entranceName).toBeUndefined();
+    // Ends on the network (node C), not inside the building.
+    expect([route.destination.lon, route.destination.lat]).toEqual(C);
+    expect(route.steps.at(-1)?.instruction).toContain("nearest path");
+  });
+
+  it("treats a raw coordinate destination as a point arrival", () => {
+    const route = computeRoute(snapshot, {
+      from: { kind: "coord", lonLat: A },
+      to: { kind: "coord", lonLat: D },
+      stepFree: false,
+    });
+    expect(route.destination.arrival).toBe("point");
+    expect([route.destination.lon, route.destination.lat]).toEqual(D);
+  });
+});
+
 describe("geo-math", () => {
   it("haversine is sane for ~100m", () => {
     const d = haversineMeters([-0.244, 51.457], [-0.244, 51.4579]);

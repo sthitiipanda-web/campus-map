@@ -25,7 +25,20 @@ export interface RouteResponse {
   geometry: { type: "LineString"; coordinates: [number, number][] };
   steps: RouteStep[];
   origin: { name: string; lon: number; lat: number };
-  destination: { id?: string; name: string; lon: number; lat: number };
+  /**
+   * Where the walk actually ends. For a POI with mapped entrances, lon/lat is
+   * the entrance the route uses (arrival: "entrance"); without one, the route
+   * honestly stops on the nearest path (arrival: "path") instead of diving
+   * into the building centroid.
+   */
+  destination: {
+    id?: string;
+    name: string;
+    lon: number;
+    lat: number;
+    arrival: "entrance" | "path" | "point";
+    entranceName?: string;
+  };
 }
 
 export type RouteErrorCode = "UNKNOWN_POI" | "NO_NEARBY_PATH" | "NO_ROUTE" | "NO_STEP_FREE_ROUTE";
@@ -46,6 +59,10 @@ interface ResolvedEndpoint {
   anchor: [number, number];
   name: string;
   poiId?: string;
+  /** How the endpoint met the graph: a mapped entrance, a snapped POI, or a raw coordinate. */
+  resolvedBy: "entrance" | "snap" | "coord";
+  /** Entrance door per graph node, for entrance-resolved POIs. */
+  entranceByNode?: Map<string, { name: string | null; lon: number; lat: number }>;
   stepFreeEntranceFallback: boolean;
 }
 
@@ -78,6 +95,7 @@ function resolveEndpoint(
       nodeIds: [snapped.node.id],
       anchor: input.lonLat,
       name: role === "origin" ? "your location" : "the selected point",
+      resolvedBy: "coord",
       stepFreeEntranceFallback: false,
     };
   }
@@ -88,26 +106,45 @@ function resolveEndpoint(
 
   const allEntranceNodes: string[] = [];
   const stepFreeEntranceNodes: string[] = [];
+  const entranceByNode = new Map<string, { name: string | null; lon: number; lat: number }>();
   for (const e of snapshot.entrances.features) {
     const p = e.properties ?? {};
     if (p.locationId !== input.id || typeof p.nodeId !== "string") continue;
     if (!graph.nodes.has(p.nodeId)) continue;
     allEntranceNodes.push(p.nodeId);
+    if (e.geometry?.type === "Point") {
+      const [elon, elat] = (e.geometry as Point).coordinates as [number, number];
+      entranceByNode.set(p.nodeId, {
+        name: typeof p.name === "string" ? p.name : null,
+        lon: elon,
+        lat: elat,
+      });
+    }
     if (p.stepFree === true) stepFreeEntranceNodes.push(p.nodeId);
   }
 
   let nodeIds =
     stepFree && stepFreeEntranceNodes.length > 0 ? stepFreeEntranceNodes : allEntranceNodes;
   const fallback = stepFree && stepFreeEntranceNodes.length === 0 && allEntranceNodes.length > 0;
+  let resolvedBy: ResolvedEndpoint["resolvedBy"] = "entrance";
 
   if (nodeIds.length === 0) {
     // No mapped entrances yet — snap the building point to the path network.
     const snapped = nearestNode(graph, [lon, lat], stepFree);
     if (!snapped) throw new RouteError("NO_NEARBY_PATH", `No walkable path near ${name}`);
     nodeIds = [snapped.node.id];
+    resolvedBy = "snap";
   }
 
-  return { nodeIds, anchor: [lon, lat], name, poiId: input.id, stepFreeEntranceFallback: fallback };
+  return {
+    nodeIds,
+    anchor: [lon, lat],
+    name,
+    poiId: input.id,
+    resolvedBy,
+    entranceByNode: resolvedBy === "entrance" ? entranceByNode : undefined,
+    stepFreeEntranceFallback: fallback,
+  };
 }
 
 /** Orient an edge's vertex list so it starts at `fromNodeId`. */
@@ -179,14 +216,36 @@ export function computeRoute(snapshot: CampusSnapshot, req: RouteRequest): Route
     pathMeters += edge.lengthMeters;
   }
 
-  const arrivalMeters = haversineMeters([endNode.lon, endNode.lat], destination.anchor);
-  pushCoord(destination.anchor);
+  // ── End the walk where a walker can actually stand ────────────────────────
+  // Mapped entrance: finish at the door. Snapped POI: finish on the nearest
+  // path and say so, instead of drawing a line into the building centroid.
+  // Raw coordinate: finish at the requested point.
+  const arrivalEntrance = destination.entranceByNode?.get(result.path[result.path.length - 1]!);
+  let arrival: RouteResponse["destination"]["arrival"];
+  let endPoint: [number, number];
+  if (arrivalEntrance) {
+    arrival = "entrance";
+    endPoint = [arrivalEntrance.lon, arrivalEntrance.lat];
+  } else if (destination.resolvedBy === "snap") {
+    arrival = "path";
+    endPoint = [endNode.lon, endNode.lat];
+  } else {
+    arrival = "point";
+    endPoint = destination.anchor;
+  }
+  const arrivalMeters = haversineMeters([endNode.lon, endNode.lat], endPoint);
+  pushCoord(endPoint);
 
   const distanceMeters = Math.round(approachMeters + pathMeters + arrivalMeters);
   const durationSeconds = Math.round(distanceMeters / WALK_SPEED_MPS);
 
   const stepFreeEntranceFallback =
     origin.stepFreeEntranceFallback || destination.stepFreeEntranceFallback;
+
+  const arrivalNotes: string[] = [];
+  if (arrivalEntrance?.name) arrivalNotes.push(arrivalEntrance.name);
+  if (arrival === "path") arrivalNotes.push("the route ends on the nearest path");
+  if (stepFreeEntranceFallback) arrivalNotes.push("nearest mapped entrance may include steps");
 
   const steps: RouteStep[] = [];
   if (approachMeters > 15) {
@@ -200,7 +259,7 @@ export function computeRoute(snapshot: CampusSnapshot, req: RouteRequest): Route
     ...buildSteps(
       legs,
       destination.name,
-      stepFreeEntranceFallback ? "nearest mapped entrance may include steps" : undefined,
+      arrivalNotes.length > 0 ? arrivalNotes.join("; ") : undefined,
     ),
   );
 
@@ -216,8 +275,10 @@ export function computeRoute(snapshot: CampusSnapshot, req: RouteRequest): Route
     destination: {
       id: destination.poiId,
       name: destination.name,
-      lon: destination.anchor[0],
-      lat: destination.anchor[1],
+      lon: endPoint[0],
+      lat: endPoint[1],
+      arrival,
+      entranceName: arrivalEntrance?.name ?? undefined,
     },
   };
 }
