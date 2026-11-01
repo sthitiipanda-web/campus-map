@@ -16,7 +16,7 @@ export function PoiSheet({ poi, onDirections, onClose }: PoiSheetProps) {
   return (
     <section
       aria-label={poi.name}
-      className="sheet-rise pointer-events-auto w-full max-w-md rounded-t-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
+      className="sheet-rise pointer-events-auto w-full max-w-md rounded-t-(--radius-sheet) lg:mb-0 lg:rounded-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
       style={{ borderTopColor: accent, borderTopWidth: 4 }}
     >
       <div className="grab-handle" aria-hidden="true" />

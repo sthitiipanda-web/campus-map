@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection, Polygon } from "geojson";
 import { CampusMap } from "@/components/map/CampusMap";
+import type { CollegeLabel } from "@/components/map/MapInner";
 import { DirectionsPanel } from "@/components/directions/DirectionsPanel";
 import { WalkHud } from "@/components/directions/WalkHud";
 import { OriginSheet } from "@/components/sheets/OriginSheet";
@@ -11,10 +12,20 @@ import { SearchBox } from "@/components/search/SearchBox";
 import { useCampusData } from "@/hooks/useCampusData";
 import { useLiveLocation } from "@/hooks/useLiveLocation";
 import { useSpeechSupported } from "@/hooks/useVoiceGuidance";
-import { CAMPUS_BBOX } from "@/lib/config/campus";
+import { CAMPUS_BBOX, type College } from "@/lib/config/campus";
+import { CHIP_GROUPS } from "@/lib/config/poi-style";
+import { pointInPolygon } from "@/lib/geo/point-in-polygon";
 import { OFF_ROUTE_METERS, routeProgress } from "@/lib/routing/progress";
 import type { RouteResponse } from "@/lib/routing/route-service";
 import type { SearchablePoi } from "@/lib/search/score";
+
+/** Display names for the college pills (slugs come from the real POI data). */
+const COLLEGE_DISPLAY_NAMES: Partial<Record<College, string>> = {
+  "digby-stuart": "Digby Stuart",
+  froebel: "Froebel",
+  southlands: "Southlands",
+  whitelands: "Whitelands",
+};
 
 type Origin = { kind: "geo"; coords: [number, number] } | { kind: "poi"; poi: SearchablePoi };
 
@@ -42,8 +53,9 @@ function insideCampus([lon, lat]: [number, number]): boolean {
  * device (UK GDPR, §12).
  */
 export function MapShell() {
-  const { pois, terrain, status } = useCampusData();
+  const { pois, terrain, paths, status } = useCampusData();
   const [mode, setMode] = useState<Mode>("idle");
+  const [chip, setChip] = useState<string | null>(null);
   const [selected, setSelected] = useState<SearchablePoi | null>(null);
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
@@ -69,7 +81,7 @@ export function MapShell() {
   const offRoute = progress !== null && progress.offRouteMeters > OFF_ROUTE_METERS;
 
   // POIs as GeoJSON for the map's dot layer (id copied into properties so
-  // click hit-testing can read it back).
+  // click hit-testing can read it back; category drives the badge colour).
   const poisFc = useMemo<FeatureCollection | null>(() => {
     if (pois.length === 0) return null;
     return {
@@ -78,9 +90,59 @@ export function MapShell() {
         type: "Feature" as const,
         id: p.id,
         geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
-        properties: { id: p.id, name: p.name, college: p.college },
+        properties: { id: p.id, name: p.name, college: p.college, category: p.category },
       })),
     };
+  }, [pois]);
+
+  // Category filter chips narrow the dots on the map; search always runs
+  // over everything.
+  const filteredPoisFc = useMemo<FeatureCollection | null>(() => {
+    if (!poisFc || !chip) return poisFc;
+    const cats = CHIP_GROUPS.find((g) => g.id === chip)?.categories as string[] | undefined;
+    if (!cats) return poisFc;
+    return {
+      ...poisFc,
+      features: poisFc.features.filter(
+        (f) => typeof f.properties?.category === "string" && cats.includes(f.properties.category),
+      ),
+    };
+  }, [poisFc, chip]);
+
+  // Give each building footprint its college (when a classified POI stands
+  // inside it) so the map can tint it — derived from real data, not drawn.
+  const terrainWithColleges = useMemo<FeatureCollection | null>(() => {
+    if (!terrain) return null;
+    const classified = pois.filter((p) => p.college !== "shared");
+    if (classified.length === 0) return terrain;
+    return {
+      ...terrain,
+      features: terrain.features.map((f) => {
+        if (f.properties?.kind !== "building" || f.geometry?.type !== "Polygon") return f;
+        const rings = (f.geometry as Polygon).coordinates;
+        const inside = classified.find((p) => pointInPolygon([p.lon, p.lat], rings));
+        return inside ? { ...f, properties: { ...f.properties, college: inside.college } } : f;
+      }),
+    };
+  }, [terrain, pois]);
+
+  // College name pills sit at the centroid of each college's classified POIs.
+  const collegeLabels = useMemo<CollegeLabel[]>(() => {
+    const sums = new Map<College, { lon: number; lat: number; n: number }>();
+    for (const p of pois) {
+      if (p.college === "shared") continue;
+      const s = sums.get(p.college) ?? { lon: 0, lat: 0, n: 0 };
+      s.lon += p.lon;
+      s.lat += p.lat;
+      s.n += 1;
+      sums.set(p.college, s);
+    }
+    const labels: CollegeLabel[] = [];
+    for (const [college, s] of sums) {
+      const name = COLLEGE_DISPLAY_NAMES[college];
+      if (name) labels.push({ college, name, lon: s.lon / s.n, lat: s.lat / s.n });
+    }
+    return labels;
   }, [pois]);
 
   const fetchRoute = useCallback(
@@ -207,8 +269,10 @@ export function MapShell() {
       <CampusMap
         selected={selected}
         route={mode === "route" ? route : null}
-        poisFc={poisFc}
-        terrainFc={terrain}
+        poisFc={filteredPoisFc}
+        terrainFc={terrainWithColleges}
+        pathsFc={paths}
+        collegeLabels={collegeLabels}
         userLocation={staticLocation}
         livePosition={live.position}
         heading={live.heading}
@@ -219,11 +283,66 @@ export function MapShell() {
       />
 
       {!walking && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))]">
-          <div className="pointer-events-auto w-full max-w-md">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-center gap-2 p-4 pt-[max(1rem,env(safe-area-inset-top))] lg:items-start">
+          <div className="pointer-events-auto flex w-full max-w-md flex-col gap-2">
+            <div className="flex items-center gap-2.5 rounded-(--radius-control) border border-stone-300 bg-surface-raised/95 px-3 py-2 shadow-lg backdrop-blur-sm">
+              <span
+                aria-hidden="true"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-parkland-900 text-white"
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18">
+                  <path d="M9 1l2.6 6.4L9 17 6.4 7.4 9 1Z" fill="currentColor" />
+                  <path d="M9 1l2.6 6.4H6.4L9 1Z" fill="#c9961a" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-body leading-tight font-bold text-ink">Campus Navigator</p>
+                <p className="text-small leading-tight text-ink-muted">University of Roehampton</p>
+              </div>
+            </div>
             <SearchBox pois={pois} status={status} onSelect={selectDestination} />
+            {pois.length > 0 && (
+              <div
+                role="group"
+                aria-label="Filter places by type"
+                className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
+              >
+                <button
+                  type="button"
+                  onClick={() => setChip(null)}
+                  aria-pressed={chip === null}
+                  className={`flex h-8 shrink-0 items-center rounded-full border px-3 text-small font-semibold shadow-sm transition-colors ${
+                    chip === null
+                      ? "border-parkland-900 bg-parkland-900 text-white"
+                      : "border-stone-300 bg-surface-raised/95 text-ink"
+                  }`}
+                >
+                  All
+                </button>
+                {CHIP_GROUPS.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setChip((cur) => (cur === g.id ? null : g.id))}
+                    aria-pressed={chip === g.id}
+                    className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-small font-semibold shadow-sm transition-colors ${
+                      chip === g.id
+                        ? "border-parkland-900 bg-parkland-900 text-white"
+                        : "border-stone-300 bg-surface-raised/95 text-ink"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="block h-2.5 w-2.5 rounded-full border border-white/70"
+                      style={{ backgroundColor: g.color }}
+                    />
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {status === "error" && (
-              <p role="alert" className="mt-2 text-center text-small text-ink-muted">
+              <p role="alert" className="text-center text-small text-ink-muted">
                 Couldn’t load campus data — check your connection and reload.
               </p>
             )}
@@ -258,7 +377,7 @@ export function MapShell() {
         </div>
       )}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 lg:items-start lg:px-4 lg:pb-4">
         {mode === "route" && routeError && (
           <p
             role="alert"

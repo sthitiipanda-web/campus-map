@@ -62,7 +62,7 @@ export function DirectionsPanel({
   return (
     <section
       aria-label={`Directions to ${route.destination.name}`}
-      className="sheet-rise pointer-events-auto flex max-h-[55dvh] w-full max-w-md flex-col rounded-t-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
+      className="sheet-rise pointer-events-auto flex max-h-[55dvh] w-full max-w-md flex-col rounded-t-(--radius-sheet) lg:mb-0 lg:rounded-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
     >
       <div className="grab-handle" aria-hidden="true" />
 
@@ -133,7 +133,10 @@ export function DirectionsPanel({
               Step-free route (avoid stairs)
             </label>
             {supportsVoice && (
-              <label htmlFor="voice-guidance" className="flex items-center gap-2 text-small text-ink">
+              <label
+                htmlFor="voice-guidance"
+                className="flex items-center gap-2 text-small text-ink"
+              >
                 <input
                   id="voice-guidance"
                   type="checkbox"

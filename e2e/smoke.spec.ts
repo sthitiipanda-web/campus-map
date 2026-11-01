@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 test("public home renders the map shell", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByLabel("Search campus buildings and facilities")).toBeVisible();
-  await expect(page.getByText("University of Roehampton", { exact: false })).toBeVisible();
+  // The name appears in both the brand header and the attribution pill.
+  await expect(page.getByText("Campus Navigator", { exact: true })).toBeVisible();
+  await expect(page.getByText("University of Roehampton", { exact: true })).toBeVisible();
 });
 
 test("admin area redirects unauthenticated users to login", async ({ page }) => {

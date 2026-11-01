@@ -37,7 +37,7 @@ export function OriginSheet({
   return (
     <section
       aria-label={`Choose a starting point for ${destination.name}`}
-      className="sheet-rise pointer-events-auto max-h-[70dvh] w-full max-w-md overflow-y-auto rounded-t-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
+      className="sheet-rise pointer-events-auto max-h-[70dvh] w-full max-w-md overflow-y-auto rounded-t-(--radius-sheet) lg:mb-0 lg:rounded-(--radius-sheet) border border-stone-300 bg-surface-raised shadow-2xl"
     >
       <div className="grab-handle" aria-hidden="true" />
       <div className="flex items-center gap-2 p-4 pb-2 pt-3">
