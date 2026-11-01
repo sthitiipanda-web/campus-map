@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 
@@ -30,6 +31,15 @@ export default async function AdminDashboard() {
       </header>
 
       <section className="mt-10 grid gap-4 sm:grid-cols-2">
+        <Link
+          href="/admin/entrances"
+          className="rounded-(--radius-sheet) border border-stone-300 bg-surface-raised p-6 transition-colors hover:border-parkland-900"
+        >
+          <h2 className="font-semibold">Entrances</h2>
+          <p className="mt-1 text-small text-ink-muted">
+            Pin each building’s real doors — routes finish there, not at the centre
+          </p>
+        </Link>
         {[
           ["Locations & pins", "Phase 2 — map-based editor"],
           ["Path network", "Phase 2 — draw the walkable graph"],
