@@ -12,6 +12,8 @@ interface CampusDataResponse {
   pois: FeatureCollection;
   /** Decorative terrain (footprints, greenery, water, trees); absent in snapshots before v4. */
   terrain?: FeatureCollection;
+  /** The walkable network — drawn on the map as real footpaths. */
+  edges?: FeatureCollection;
 }
 
 function toSearchable(f: Feature): SearchablePoi | null {
@@ -36,10 +38,12 @@ function toSearchable(f: Feature): SearchablePoi | null {
 export function useCampusData(): {
   pois: SearchablePoi[];
   terrain: FeatureCollection | null;
+  paths: FeatureCollection | null;
   status: CampusDataStatus;
 } {
   const [pois, setPois] = useState<SearchablePoi[]>([]);
   const [terrain, setTerrain] = useState<FeatureCollection | null>(null);
+  const [paths, setPaths] = useState<FeatureCollection | null>(null);
   const [status, setStatus] = useState<CampusDataStatus>("loading");
 
   useEffect(() => {
@@ -59,6 +63,7 @@ export function useCampusData(): {
         if (!cancelled) {
           setPois(parsed);
           setTerrain(data.terrain?.type === "FeatureCollection" ? data.terrain : null);
+          setPaths(data.edges?.type === "FeatureCollection" ? data.edges : null);
           setStatus("ready");
         }
       })
@@ -70,5 +75,5 @@ export function useCampusData(): {
     };
   }, []);
 
-  return { pois, terrain, status };
+  return { pois, terrain, paths, status };
 }
