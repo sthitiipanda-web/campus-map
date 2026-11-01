@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import Map, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import type { MapMouseEvent } from "mapbox-gl";
-import type { FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection, Polygon } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { CAMPUS_BBOX, COLLEGE_ACCENTS, MAP_DEFAULT_VIEW } from "@/lib/config/campus";
 import type { RouteResponse } from "@/lib/routing/route-service";
@@ -26,17 +26,27 @@ const DRAW_IN_MS = 1400;
    data while the basemap around it stays muted, so the campus reads like an
    illustrated map. Each kind has a light/dark pair. */
 const TERRAIN = {
-  grass: ["#d6e7c3", "#202b1a"],
-  garden: ["#cbe2b6", "#25311d"],
-  pitch: ["#bfdec6", "#1f3125"],
-  wood: ["#adcf94", "#2b3b21"],
-  scrub: ["#bed9a7", "#27361f"],
-  water: ["#a9cfe4", "#17303e"],
-  buildingFill: ["#ebe3d1", "#31362c"],
+  grass: ["#cfe3b6", "#202b1a"],
+  garden: ["#c4ddaa", "#25311d"],
+  pitch: ["#b5d8bd", "#1f3125"],
+  wood: ["#a3c789", "#2b3b21"],
+  scrub: ["#b6d49e", "#27361f"],
+  water: ["#9ec9e2", "#17303e"],
+  buildingFill: ["#efe6d2", "#3a4034"],
   buildingLine: ["#cfc2a3", "#49523f"],
-  tree: ["#5f8f4b", "#4e6b3c"],
+  tree: ["#5f8f4b", "#42603a"],
+  treeRim: ["#4a7338", "#304a2a"],
+  /** Wall-to-wall parkland base inside the campus boundary. */
+  campusBase: ["#dcebc9", "#1a2315"],
+  /** Scrim that fades the world outside the campus boundary. */
+  mask: ["#f0efe9", "#0d110c"],
+  boundaryLine: ["#a4c285", "#3b4a2f"],
 } as const;
 const terrainColor = (k: keyof typeof TERRAIN, dark: boolean) => TERRAIN[k][dark ? 1 : 0];
+
+/** Untagged buildings extrude at this uniform decorative height; buildings with
+ *  real OSM height/levels data use their own value (properties.heightM). */
+const DEFAULT_BUILDING_HEIGHT_M = 7;
 
 const subscribeScheme = (cb: () => void) => {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -86,6 +96,29 @@ export default function MapInner({
 }: MapInnerProps) {
   const mapRef = useRef<MapRef>(null);
   const isDark = useSyncExternalStore(subscribeScheme, readScheme, serverScheme);
+
+  // Spotlight mask: one polygon covering the whole envelope, with the campus
+  // boundary rings cut out as holes — fading everything that isn't campus.
+  const campusMask = useMemo<Feature | null>(() => {
+    const rings = (terrainFc?.features ?? [])
+      .filter((f) => f.properties?.kind === "boundary" && f.geometry?.type === "Polygon")
+      .map((f) => (f.geometry as Polygon).coordinates[0]!)
+      .filter(Boolean);
+    if (rings.length === 0) return null;
+    const pad = 0.05; // overshoot the camera bounds so no sliver escapes
+    const outer: [number, number][] = [
+      [CAMPUS_BBOX.minLon - pad, CAMPUS_BBOX.minLat - pad],
+      [CAMPUS_BBOX.maxLon + pad, CAMPUS_BBOX.minLat - pad],
+      [CAMPUS_BBOX.maxLon + pad, CAMPUS_BBOX.maxLat + pad],
+      [CAMPUS_BBOX.minLon - pad, CAMPUS_BBOX.maxLat + pad],
+      [CAMPUS_BBOX.minLon - pad, CAMPUS_BBOX.minLat - pad],
+    ];
+    return {
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Polygon", coordinates: [outer, ...rings] },
+    };
+  }, [terrainFc]);
 
   // Hide the basemap's own POI/transit labels: they aren't searchable, so
   // every label the user sees should be one of ours. Idempotent — re-runs
@@ -245,7 +278,14 @@ export default function MapInner({
     >
       {terrainFc && (
         <Source id="terrain" type="geojson" data={terrainFc}>
-          {/* Greenery first, then water, then buildings — so footprints sit on lawns. */}
+          {/* Campus base first (wall-to-wall parkland inside the boundary),
+              then greenery, water and buildings — so footprints sit on lawns. */}
+          <Layer
+            id="campus-base"
+            type="fill"
+            filter={["==", ["get", "kind"], "boundary"]}
+            paint={{ "fill-color": terrainColor("campusBase", isDark) }}
+          />
           <Layer
             id="terrain-green"
             type="fill"
@@ -279,16 +319,27 @@ export default function MapInner({
             paint={{ "fill-color": terrainColor("water", isDark) }}
           />
           <Layer
-            id="terrain-buildings"
-            type="fill"
-            filter={["==", ["get", "kind"], "building"]}
-            paint={{ "fill-color": terrainColor("buildingFill", isDark) }}
-          />
-          <Layer
             id="terrain-building-outlines"
             type="line"
             filter={["==", ["get", "kind"], "building"]}
             paint={{ "line-color": terrainColor("buildingLine", isDark), "line-width": 1 }}
+          />
+          <Layer
+            // 3D model-village buildings: real OSM height where tagged,
+            // a uniform decorative height elsewhere.
+            id="terrain-buildings"
+            type="fill-extrusion"
+            filter={["==", ["get", "kind"], "building"]}
+            paint={{
+              "fill-extrusion-color": terrainColor("buildingFill", isDark),
+              "fill-extrusion-height": [
+                "coalesce",
+                ["get", "heightM"],
+                DEFAULT_BUILDING_HEIGHT_M,
+              ],
+              "fill-extrusion-opacity": 0.95,
+              "fill-extrusion-vertical-gradient": true,
+            }}
           />
           <Layer
             id="terrain-trees"
@@ -296,11 +347,39 @@ export default function MapInner({
             filter={["==", ["get", "kind"], "tree"]}
             paint={{
               "circle-color": terrainColor("tree", isDark),
-              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 1.2, 16, 2.4, 18, 4.5],
-              "circle-opacity": 0.8,
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 1.8, 16, 3.5, 18, 7],
+              "circle-opacity": 0.9,
+              "circle-stroke-color": terrainColor("treeRim", isDark),
+              "circle-stroke-width": 1.4,
             }}
           />
         </Source>
+      )}
+
+      {campusMask && (
+        <Source id="campus-mask" type="geojson" data={campusMask}>
+          {/* Everything beyond the campus boundary fades into the background. */}
+          <Layer
+            id="campus-mask-scrim"
+            type="fill"
+            paint={{
+              "fill-color": terrainColor("mask", isDark),
+              "fill-opacity": isDark ? 0.88 : 0.86,
+            }}
+          />
+        </Source>
+      )}
+      {campusMask && terrainFc && (
+        <Layer
+          id="campus-boundary-line"
+          type="line"
+          source="terrain"
+          filter={["==", ["get", "kind"], "boundary"]}
+          paint={{
+            "line-color": terrainColor("boundaryLine", isDark),
+            "line-width": ["interpolate", ["linear"], ["zoom"], 13, 1.2, 17, 3],
+          }}
+        />
       )}
 
       {poisFc && (
@@ -418,6 +497,22 @@ export default function MapInner({
               </svg>
             )}
           </span>
+        </Marker>
+      )}
+
+      {route && (
+        <Marker
+          longitude={route.destination.lon}
+          latitude={route.destination.lat}
+          anchor="center"
+        >
+          {/* Where the walk actually ends: a mapped entrance, or the nearest path. */}
+          <span
+            aria-hidden="true"
+            data-testid="arrival-dot"
+            className="block h-3.5 w-3.5 rounded-full border-2 border-white shadow-[0_0_0_5px_rgba(255,255,255,0.35)]"
+            style={{ backgroundColor: destinationAccent }}
+          />
         </Marker>
       )}
 

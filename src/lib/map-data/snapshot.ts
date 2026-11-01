@@ -52,7 +52,7 @@ export async function buildSnapshot(): Promise<Omit<CampusSnapshot, "version" | 
       ) AS fc
       FROM entrances e
       JOIN locations l ON l.id = e.location_id
-      WHERE l.status = 'published' AND l.deleted_at IS NULL
+      WHERE l.status = 'published' AND l.deleted_at IS NULL AND e.deleted_at IS NULL
     `),
     db.execute(sql`
       SELECT jsonb_build_object(
@@ -89,7 +89,7 @@ export async function buildSnapshot(): Promise<Omit<CampusSnapshot, "version" | 
           'type','Feature',
           'id', id,
           'geometry', ST_AsGeoJSON(coalesce(polygon, point))::jsonb,
-          'properties', jsonb_build_object('kind', kind, 'name', name)
+          'properties', jsonb_build_object('kind', kind, 'name', name, 'heightM', height_m)
         )), '[]'::jsonb)
       ) AS fc
       FROM terrain_features

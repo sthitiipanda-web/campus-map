@@ -71,6 +71,7 @@ export const entrances = pgTable("entrances", {
   point: geometry("Point")("point").notNull(),
   stepFree: boolean("step_free").notNull().default(false),
   nodeId: uuid("node_id").references(() => pathNodes.id),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const pathEdges = pgTable("path_edges", {
@@ -99,6 +100,8 @@ export const terrainFeatures = pgTable("terrain_features", {
   name: text("name"),
   polygon: geometry("Polygon")("polygon"),
   point: geometry("Point")("point"),
+  /** Real height from OSM tags (height, or building:levels × 3 m); null when untagged. */
+  heightM: real("height_m"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });

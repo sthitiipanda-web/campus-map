@@ -44,6 +44,8 @@ rel(${CAMPUS_RELATION});map_to_area->.campus;
 node["natural"="tree"](area.campus)->.trees;
 .polys out geom;
 .trees out;
+rel(${CAMPUS_RELATION});
+out geom;
 `;
 
 interface OsmElement {
@@ -88,6 +90,20 @@ function stitchRings(segments: Pt[][]): Pt[][] {
   return rings;
 }
 
+/**
+ * Real building height from OSM tags only: explicit `height` (metres), else
+ * `building:levels` × 3 m (standard storey approximation). Null when untagged —
+ * the map renders untagged buildings at a uniform decorative height instead of
+ * inventing per-building numbers.
+ */
+function heightFor(tags: Record<string, string>): number | null {
+  const h = Number.parseFloat(tags.height ?? "");
+  if (Number.isFinite(h) && h > 0 && h < 200) return h;
+  const levels = Number.parseFloat(tags["building:levels"] ?? "");
+  if (Number.isFinite(levels) && levels > 0 && levels < 40) return levels * 3;
+  return null;
+}
+
 /** Tag → terrain kind; first match wins (a sports-hall building stays a building). */
 function kindFor(tags: Record<string, string>): TerrainKind | null {
   if (tags.building) return "building";
@@ -126,6 +142,7 @@ async function main() {
     name: string | null;
     polygon: string | null;
     point: string | null;
+    heightM: number | null;
   };
   const rows: Row[] = [];
   const perKind = new Map<TerrainKind, number>();
@@ -142,14 +159,24 @@ async function main() {
         skipped++;
         continue;
       }
-      rows.push({ kind: "tree", name: null, polygon: null, point: ewktPoint(parsed.data) });
+      rows.push({
+        kind: "tree",
+        name: null,
+        polygon: null,
+        point: ewktPoint(parsed.data),
+        heightM: null,
+      });
       perKind.set("tree", (perKind.get("tree") ?? 0) + 1);
       continue;
     }
 
-    const kind = e.tags ? kindFor(e.tags) : null;
+    // The campus relation itself becomes the "boundary" kind: its outer rings
+    // paint the campus base and mask everything outside it.
+    const isCampusBoundary = e.type === "relation" && e.id === CAMPUS_RELATION;
+    const kind = isCampusBoundary ? "boundary" : e.tags ? kindFor(e.tags) : null;
     if (!kind) continue;
     const name = e.tags?.name ?? null;
+    const heightM = kind === "building" && e.tags ? heightFor(e.tags) : null;
 
     const addPolygon = (ringSet: Pt[][]) => {
       const parsed = polygonGeometry.safeParse({ type: "Polygon", coordinates: ringSet });
@@ -157,7 +184,7 @@ async function main() {
         skipped++;
         return;
       }
-      rows.push({ kind, name, polygon: ewktPolygon(parsed.data), point: null });
+      rows.push({ kind, name, polygon: ewktPolygon(parsed.data), point: null, heightM });
       perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
     };
 
@@ -168,6 +195,16 @@ async function main() {
       const last = ring[ring.length - 1]!;
       if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
       addPolygon([ring]);
+      continue;
+    }
+
+    if (isCampusBoundary && e.members) {
+      // Each stitched outer ring is one boundary polygon (the campus has
+      // separate grounds, e.g. Whitelands). Holes are not meaningful here.
+      const segs = e.members
+        .filter((m) => m.type === "way" && m.role === "outer" && m.geometry)
+        .map((m) => m.geometry!.map(({ lon, lat }) => [lon, lat] as Pt));
+      for (const outer of stitchRings(segs)) addPolygon([outer]);
       continue;
     }
 

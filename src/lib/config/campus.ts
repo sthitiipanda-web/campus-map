@@ -16,11 +16,14 @@ export const CAMPUS_BBOX = {
   maxLat: 51.475,
 } as const;
 
-/** Initial map camera until real data provides a fit-bounds target. */
+/** Initial map camera until real data provides a fit-bounds target. The tilt
+ *  and slight rotation give the campus its isometric "model village" look. */
 export const MAP_DEFAULT_VIEW = {
   longitude: -0.244,
   latitude: 51.457,
-  zoom: 15.2,
+  zoom: 15.4,
+  pitch: 50,
+  bearing: -18,
 } as const;
 
 /** Default pedestrian speed (m/s); configurable per §6 of the brief. */
@@ -75,6 +78,8 @@ export type NodeType = (typeof NODE_TYPES)[number];
 /**
  * Decorative terrain layers (building footprints, greenery, water, trees) —
  * purely visual context under the wayfinding data; never routed or searched.
+ * "boundary" is the campus grounds outline (OSM relation 5904595): it paints
+ * the campus base and masks everything outside it.
  */
 export const TERRAIN_KINDS = [
   "building",
@@ -85,5 +90,6 @@ export const TERRAIN_KINDS = [
   "water",
   "pitch",
   "tree",
+  "boundary",
 ] as const;
 export type TerrainKind = (typeof TERRAIN_KINDS)[number];
