@@ -135,7 +135,13 @@ export default function EntranceEditorMap({
               style={{ backgroundColor: mine ? "#2e5a33" : "#9aa297", opacity: mine ? 1 : 0.6 }}
             >
               {/* door glyph */}
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
                 <path d="M3 1.5h10V15H3V1.5Zm2 2V13h6V3.5H5Zm4 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z" />
               </svg>
             </span>

@@ -217,7 +217,10 @@ export function EntranceEditor({ role }: { role: AdminRole }) {
                 className="mt-1 h-11 w-full rounded-(--radius-control) border border-stone-300 bg-surface-raised px-3 text-body text-ink"
               />
             </div>
-            <label htmlFor="entrance-step-free" className="flex items-center gap-2 text-small text-ink">
+            <label
+              htmlFor="entrance-step-free"
+              className="flex items-center gap-2 text-small text-ink"
+            >
               <input
                 id="entrance-step-free"
                 type="checkbox"

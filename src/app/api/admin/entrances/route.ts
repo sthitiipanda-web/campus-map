@@ -146,10 +146,7 @@ export async function DELETE(request: Request) {
   const user = await requireEditor();
   if (!user) return forbidden();
 
-  const id = z
-    .string()
-    .uuid()
-    .safeParse(new URL(request.url).searchParams.get("id"));
+  const id = z.string().uuid().safeParse(new URL(request.url).searchParams.get("id"));
   if (!id.success) {
     return NextResponse.json({ error: "Invalid entrance id" }, { status: 400, headers: NO_STORE });
   }
