@@ -1,13 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Map, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import type { MapMouseEvent } from "mapbox-gl";
 import type { Feature, FeatureCollection, Polygon } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { CAMPUS_BBOX, COLLEGE_ACCENTS, MAP_DEFAULT_VIEW } from "@/lib/config/campus";
+import { CAMPUS_BBOX, COLLEGE_ACCENTS, MAP_DEFAULT_VIEW, type College } from "@/lib/config/campus";
+import { CATEGORY_COLORS, CHIP_GROUPS, COLLEGE_BUILDING_TINTS } from "@/lib/config/poi-style";
 import type { RouteResponse } from "@/lib/routing/route-service";
 import type { SearchablePoi } from "@/lib/search/score";
+
+/** POI dot colour by category — built once from the shared palette. */
+const POI_CATEGORY_COLOR = [
+  "match",
+  ["get", "category"],
+  ...Object.entries(CATEGORY_COLORS).flatMap(([cat, color]) => [cat, color]),
+  CATEGORY_COLORS.other,
+] as unknown as import("mapbox-gl").ExpressionSpecification;
 
 const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
@@ -22,27 +31,55 @@ const DARK_STYLE = process.env.NEXT_PUBLIC_MAPBOX_STYLE_DARK ?? "mapbox://styles
 const ROUTE_START = "#35492f"; // parkland-700 — the gradient fades campus-green → college accent
 const DRAW_IN_MS = 1400;
 
-/* Terrain palette — the campus itself is painted vividly from our own OSM
-   data while the basemap around it stays muted, so the campus reads like an
-   illustrated map. Each kind has a light/dark pair. */
+/* Terrain palette — the campus is painted as one illustrated map from our own
+   OSM data: saturated parkland greens, warm stone buildings, cream footpaths.
+   Each kind has a light/dark pair. */
 const TERRAIN = {
-  grass: ["#cfe3b6", "#202b1a"],
-  garden: ["#c4ddaa", "#25311d"],
-  pitch: ["#b5d8bd", "#1f3125"],
-  wood: ["#a3c789", "#2b3b21"],
-  scrub: ["#b6d49e", "#27361f"],
-  water: ["#9ec9e2", "#17303e"],
-  buildingFill: ["#efe6d2", "#3a4034"],
-  buildingLine: ["#cfc2a3", "#49523f"],
-  tree: ["#5f8f4b", "#42603a"],
-  treeRim: ["#4a7338", "#304a2a"],
+  grass: ["#c6e0a0", "#2b3b20"],
+  garden: ["#b9dc94", "#32421f"],
+  pitch: ["#a9d6b3", "#2a4530"],
+  wood: ["#97c47b", "#374d28"],
+  scrub: ["#abce90", "#334426"],
+  water: ["#90c4e4", "#1e415a"],
+  buildingFill: ["#f2e8d2", "#434a3c"],
+  buildingLine: ["#c9ba97", "#545e48"],
+  tree: ["#549440", "#4e7340"],
+  treeRim: ["#3e7030", "#3a5a30"],
+  treeShadow: ["#2f4a22", "#000000"],
   /** Wall-to-wall parkland base inside the campus boundary. */
-  campusBase: ["#dcebc9", "#1a2315"],
-  /** Scrim that fades the world outside the campus boundary. */
-  mask: ["#f0efe9", "#0d110c"],
-  boundaryLine: ["#a4c285", "#3b4a2f"],
+  campusBase: ["#d6e8b4", "#222f16"],
+  /** Scrim that softens the world outside the campus boundary. */
+  mask: ["#f0ede2", "#0d110c"],
+  boundaryLine: ["#94bc6b", "#465c36"],
+  /** Real walkable network drawn as illustrated footpaths. */
+  pathFill: ["#fbf6e7", "#5a6349"],
+  pathCasing: ["#c9bc9b", "#3a4230"],
 } as const;
 const terrainColor = (k: keyof typeof TERRAIN, dark: boolean) => TERRAIN[k][dark ? 1 : 0];
+
+/* Basemap repaint — the stock style is recoloured at runtime into the same
+   warm palette, so the world beyond the boundary looks like a quieter page of
+   the same illustration instead of a different product. */
+const BASEMAP_TONES = {
+  light: {
+    land: "#f1ede0",
+    green: "#dde8c6",
+    water: "#a9cfe6",
+    block: "#e7dfcc",
+    road: "#f8f3e5",
+    roadCase: "#d9d0b8",
+    label: "#8c8470",
+  },
+  dark: {
+    land: "#10140d",
+    green: "#1a2314",
+    water: "#16303d",
+    block: "#262b21",
+    road: "#272e20",
+    roadCase: "#1c2217",
+    label: "#6d7562",
+  },
+} as const;
 
 /** Untagged buildings extrude at this uniform decorative height; buildings with
  *  real OSM height/levels data use their own value (properties.heightM). */
@@ -56,6 +93,13 @@ const subscribeScheme = (cb: () => void) => {
 const readScheme = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
 const serverScheme = () => false;
 
+export interface CollegeLabel {
+  college: College;
+  name: string;
+  lon: number;
+  lat: number;
+}
+
 export interface MapInnerProps {
   selected?: SearchablePoi | null;
   route?: RouteResponse | null;
@@ -63,6 +107,10 @@ export interface MapInnerProps {
   poisFc?: FeatureCollection | null;
   /** Decorative terrain from the snapshot: footprints, greenery, water, trees. */
   terrainFc?: FeatureCollection | null;
+  /** The real walkable network from the snapshot, drawn as footpaths. */
+  pathsFc?: FeatureCollection | null;
+  /** College name pills, positioned at the centroid of each college's POIs. */
+  collegeLabels?: CollegeLabel[] | null;
   /** One-shot origin fix shown before walking starts. */
   userLocation?: [number, number] | null;
   /** Continuous position while walking (beacon + follow camera). */
@@ -86,6 +134,8 @@ export default function MapInner({
   route,
   poisFc,
   terrainFc,
+  pathsFc,
+  collegeLabels,
   userLocation,
   livePosition,
   heading,
@@ -96,6 +146,8 @@ export default function MapInner({
 }: MapInnerProps) {
   const mapRef = useRef<MapRef>(null);
   const isDark = useSyncExternalStore(subscribeScheme, readScheme, serverScheme);
+  const [pitched, setPitched] = useState(true);
+  const [showKey, setShowKey] = useState(false);
 
   // Spotlight mask: one polygon covering the whole envelope, with the campus
   // boundary rings cut out as holes — fading everything that isn't campus.
@@ -120,22 +172,58 @@ export default function MapInner({
     };
   }, [terrainFc]);
 
-  // Hide the basemap's own POI/transit labels: they aren't searchable, so
-  // every label the user sees should be one of ours. Idempotent — re-runs
-  // whenever the style (re)loads.
-  const declutterBasemap = useCallback(() => {
+  // Dress the stock basemap: hide its POI/transit labels (they aren't
+  // searchable, so every visible label should be ours) and recolour its
+  // layers into our warm illustrated palette. Idempotent — re-runs whenever
+  // the style (re)loads, and every repaint is per-layer fault-tolerant.
+  const dressBasemap = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (!map) return;
+    const tones = isDark ? BASEMAP_TONES.dark : BASEMAP_TONES.light;
+    let layers;
     try {
-      for (const layer of map.getStyle()?.layers ?? []) {
-        if (layer.type === "symbol" && /poi-label|transit|airport-label/.test(layer.id)) {
-          map.setLayoutProperty(layer.id, "visibility", "none");
-        }
-      }
+      layers = map.getStyle()?.layers ?? [];
     } catch {
-      // Style mid-swap — the next styledata event re-applies this.
+      return; // Style mid-swap — the next styledata event re-applies this.
     }
-  }, []);
+    for (const { id, type } of layers) {
+      try {
+        if (type === "symbol" && /poi-label|transit|airport-label/.test(id)) {
+          map.setLayoutProperty(id, "visibility", "none");
+          continue;
+        }
+        // Never repaint our own layers.
+        if (/^(campus-|terrain-|poi-|route-)/.test(id)) continue;
+        if (type === "background") {
+          map.setPaintProperty(id, "background-color", tones.land);
+        } else if (type === "fill" && /water/.test(id)) {
+          map.setPaintProperty(id, "fill-color", tones.water);
+        } else if (
+          type === "fill" &&
+          /landuse|landcover|park|pitch|grass|wood|scrub|cemetery|school|hospital|sand|golf/.test(
+            id,
+          )
+        ) {
+          map.setPaintProperty(id, "fill-color", tones.green);
+        } else if (type === "fill" && /building/.test(id)) {
+          map.setPaintProperty(id, "fill-color", tones.block);
+        } else if (type === "line" && /water|river|canal/.test(id)) {
+          map.setPaintProperty(id, "line-color", tones.water);
+        } else if (type === "line" && /road|bridge|tunnel|street|path|track/.test(id)) {
+          map.setPaintProperty(
+            id,
+            "line-color",
+            /case|casing/.test(id) ? tones.roadCase : tones.road,
+          );
+        } else if (type === "symbol") {
+          map.setPaintProperty(id, "text-color", tones.label);
+          map.setPaintProperty(id, "text-halo-color", tones.land);
+        }
+      } catch {
+        // A stock layer that rejects a property is left as-is.
+      }
+    }
+  }, [isDark]);
 
   const destinationAccent =
     (selected ? COLLEGE_ACCENTS[selected.college] : undefined) ?? COLLEGE_ACCENTS.shared;
@@ -259,8 +347,8 @@ export default function MapInner({
       mapboxAccessToken={token}
       mapStyle={isDark ? DARK_STYLE : LIGHT_STYLE}
       initialViewState={MAP_DEFAULT_VIEW}
-      onLoad={declutterBasemap}
-      onStyleData={declutterBasemap}
+      onLoad={dressBasemap}
+      onStyleData={dressBasemap}
       // Keep the camera on campus: pan/zoom outside the envelope is pointless
       // and every wasted tile request costs money (§10).
       maxBounds={[
@@ -331,14 +419,36 @@ export default function MapInner({
             type="fill-extrusion"
             filter={["==", ["get", "kind"], "building"]}
             paint={{
-              "fill-extrusion-color": terrainColor("buildingFill", isDark),
-              "fill-extrusion-height": [
-                "coalesce",
-                ["get", "heightM"],
-                DEFAULT_BUILDING_HEIGHT_M,
+              // Buildings pick up their college's pastel (derived from the
+              // POIs standing inside each footprint); unclassified ones stay
+              // warm stone.
+              "fill-extrusion-color": [
+                "match",
+                ["get", "college"],
+                "digby-stuart",
+                COLLEGE_BUILDING_TINTS["digby-stuart"]![isDark ? 1 : 0],
+                "froebel",
+                COLLEGE_BUILDING_TINTS.froebel![isDark ? 1 : 0],
+                "southlands",
+                COLLEGE_BUILDING_TINTS.southlands![isDark ? 1 : 0],
+                "whitelands",
+                COLLEGE_BUILDING_TINTS.whitelands![isDark ? 1 : 0],
+                terrainColor("buildingFill", isDark),
               ],
+              "fill-extrusion-height": ["coalesce", ["get", "heightM"], DEFAULT_BUILDING_HEIGHT_M],
               "fill-extrusion-opacity": 0.95,
               "fill-extrusion-vertical-gradient": true,
+            }}
+          />
+          <Layer
+            id="terrain-tree-shadows"
+            type="circle"
+            filter={["==", ["get", "kind"], "tree"]}
+            paint={{
+              "circle-color": terrainColor("treeShadow", isDark),
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 2, 16, 4, 18, 8],
+              "circle-opacity": isDark ? 0.35 : 0.18,
+              "circle-translate": [2.5, 2.5],
             }}
           />
           <Layer
@@ -347,10 +457,38 @@ export default function MapInner({
             filter={["==", ["get", "kind"], "tree"]}
             paint={{
               "circle-color": terrainColor("tree", isDark),
-              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 1.8, 16, 3.5, 18, 7],
-              "circle-opacity": 0.9,
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 2, 16, 4, 18, 8],
+              "circle-opacity": 0.95,
               "circle-stroke-color": terrainColor("treeRim", isDark),
               "circle-stroke-width": 1.4,
+            }}
+          />
+        </Source>
+      )}
+
+      {pathsFc && (
+        <Source id="paths" type="geojson" data={pathsFc}>
+          {/* The real walkable network — every line is a routed edge, so what
+              looks like a footpath IS a path the router can send you down. */}
+          <Layer
+            id="campus-path-casing"
+            type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
+            beforeId={terrainFc ? "terrain-building-outlines" : undefined}
+            paint={{
+              "line-color": terrainColor("pathCasing", isDark),
+              "line-width": ["interpolate", ["linear"], ["zoom"], 14, 2, 16, 3.5, 18, 6.5],
+              "line-opacity": 0.9,
+            }}
+          />
+          <Layer
+            id="campus-path-fill"
+            type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
+            beforeId={terrainFc ? "terrain-building-outlines" : undefined}
+            paint={{
+              "line-color": terrainColor("pathFill", isDark),
+              "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1.1, 16, 2.2, 18, 4.5],
             }}
           />
         </Source>
@@ -363,8 +501,10 @@ export default function MapInner({
             id="campus-mask-scrim"
             type="fill"
             paint={{
+              // Soft enough that the recoloured basemap reads as a quieter
+              // page of the same illustration, not a void.
               "fill-color": terrainColor("mask", isDark),
-              "fill-opacity": isDark ? 0.88 : 0.86,
+              "fill-opacity": isDark ? 0.55 : 0.45,
             }}
           />
         </Source>
@@ -388,22 +528,12 @@ export default function MapInner({
             id="poi-dots"
             type="circle"
             paint={{
-              "circle-color": [
-                "match",
-                ["get", "college"],
-                "digby-stuart",
-                COLLEGE_ACCENTS["digby-stuart"],
-                "froebel",
-                COLLEGE_ACCENTS.froebel,
-                "southlands",
-                COLLEGE_ACCENTS.southlands,
-                "whitelands",
-                COLLEGE_ACCENTS.whitelands,
-                COLLEGE_ACCENTS.shared,
-              ],
-              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 4, 16, 6, 18, 9],
+              // Roam-style badges: colour says what a place IS (café, library,
+              // shuttle stop…); the college pills carry the where.
+              "circle-color": POI_CATEGORY_COLOR,
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 4.5, 16, 6.5, 18, 10],
               "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 2,
+              "circle-stroke-width": 2.2,
             }}
           />
           <Layer
@@ -501,11 +631,7 @@ export default function MapInner({
       )}
 
       {route && (
-        <Marker
-          longitude={route.destination.lon}
-          latitude={route.destination.lat}
-          anchor="center"
-        >
+        <Marker longitude={route.destination.lon} latitude={route.destination.lat} anchor="center">
           {/* Where the walk actually ends: a mapped entrance, or the nearest path. */}
           <span
             aria-hidden="true"
@@ -514,6 +640,150 @@ export default function MapInner({
             style={{ backgroundColor: destinationAccent }}
           />
         </Marker>
+      )}
+
+      {!route &&
+        !walking &&
+        collegeLabels?.map((c) => (
+          <Marker key={c.college} longitude={c.lon} latitude={c.lat} anchor="center">
+            {/* College name pills at the centroid of each college's POIs —
+                positions derived from real data, not drawn by hand. */}
+            <button
+              type="button"
+              onClick={() =>
+                mapRef.current?.flyTo({
+                  center: [c.lon, c.lat],
+                  zoom: 16.6,
+                  duration: prefersReducedMotion() ? 0 : 1100,
+                  essential: true,
+                })
+              }
+              className="fade-up flex items-center gap-1.5 rounded-full border border-white/70 bg-surface-raised/95 px-3 py-1 shadow-lg backdrop-blur-sm"
+              aria-label={`Zoom to ${c.name}`}
+            >
+              <span
+                aria-hidden="true"
+                className="block h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: COLLEGE_ACCENTS[c.college] }}
+              />
+              <span className="text-small font-semibold whitespace-nowrap text-ink">{c.name}</span>
+            </button>
+          </Marker>
+        ))}
+
+      {!walking && (
+        <div className="absolute top-1/2 right-3 z-10 flex -translate-y-1/2 flex-col items-end gap-3">
+          {showKey && (
+            <div
+              className="fade-up absolute top-0 right-12 w-52 rounded-(--radius-control) border border-stone-300 bg-surface-raised p-3 shadow-xl"
+              role="dialog"
+              aria-label="Map key"
+            >
+              <p className="mb-2 text-small font-semibold text-ink">Map key</p>
+              <ul className="flex flex-col gap-1.5">
+                {CHIP_GROUPS.map((g) => (
+                  <li key={g.id} className="flex items-center gap-2 text-small text-ink-muted">
+                    <span
+                      aria-hidden="true"
+                      className="block h-3 w-3 shrink-0 rounded-full border border-white"
+                      style={{ backgroundColor: g.color }}
+                    />
+                    {g.label}
+                  </li>
+                ))}
+                <li className="flex items-center gap-2 text-small text-ink-muted">
+                  <span
+                    aria-hidden="true"
+                    className="block h-1 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: terrainColor("pathCasing", isDark) }}
+                  />
+                  Footpaths
+                </li>
+                <li className="flex items-center gap-2 text-small text-ink-muted">
+                  <span
+                    aria-hidden="true"
+                    className="block h-1 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: terrainColor("boundaryLine", isDark) }}
+                  />
+                  Campus boundary
+                </li>
+              </ul>
+            </div>
+          )}
+          <div className="flex flex-col overflow-hidden rounded-full border border-stone-300 bg-surface-raised shadow-lg">
+            <button
+              type="button"
+              onClick={() => mapRef.current?.getMap()?.zoomIn()}
+              className="flex h-10 w-10 items-center justify-center text-ink hover:bg-parkland-100"
+              aria-label="Zoom in"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                <path
+                  d="M7 1v12M1 7h12"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => mapRef.current?.getMap()?.zoomOut()}
+              className="flex h-10 w-10 items-center justify-center border-t border-stone-200 text-ink hover:bg-parkland-100"
+              aria-label="Zoom out"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                <path d="M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !pitched;
+              setPitched(next);
+              mapRef.current?.getMap()?.easeTo({
+                pitch: next ? MAP_DEFAULT_VIEW.pitch : 0,
+                bearing: next ? MAP_DEFAULT_VIEW.bearing : 0,
+                duration: prefersReducedMotion() ? 0 : 700,
+              });
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-300 bg-surface-raised text-[11px] font-bold text-ink shadow-lg hover:bg-parkland-100"
+            aria-label={pitched ? "Flatten map" : "Tilt map"}
+            aria-pressed={pitched}
+          >
+            {pitched ? "2D" : "3D"}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              mapRef.current?.flyTo({
+                center: [MAP_DEFAULT_VIEW.longitude, MAP_DEFAULT_VIEW.latitude],
+                zoom: MAP_DEFAULT_VIEW.zoom,
+                pitch: pitched ? MAP_DEFAULT_VIEW.pitch : 0,
+                bearing: pitched ? MAP_DEFAULT_VIEW.bearing : 0,
+                duration: prefersReducedMotion() ? 0 : 1100,
+                essential: true,
+              })
+            }
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-300 bg-surface-raised text-ink shadow-lg hover:bg-parkland-100"
+            aria-label="Reset view"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 1l2.2 5.8L8 15 5.8 6.8 8 1Z" fill="currentColor" />
+              <path d="M8 1l2.2 5.8H5.8L8 1Z" fill="#b5502e" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowKey((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-300 bg-surface-raised text-[10px] font-bold text-ink shadow-lg hover:bg-parkland-100"
+            aria-label="Toggle map key"
+            aria-expanded={showKey}
+          >
+            Key
+          </button>
+        </div>
       )}
 
       {selected && (
