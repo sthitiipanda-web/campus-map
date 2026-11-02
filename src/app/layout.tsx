@@ -18,6 +18,11 @@ export const metadata: Metadata = {
     "On-foot wayfinding across the University of Roehampton parkland campus: buildings, step-free routes and campus facilities.",
 };
 
+// Nonce-based CSP (src/proxy.ts) needs every page rendered per request:
+// statically prerendered HTML carries no nonce, so browsers block Next's
+// own bootstrap scripts in production and the app never hydrates.
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
