@@ -37,7 +37,10 @@ export function WalkHud({
   const act = progress ? activeStep(route.steps, progress.traveledMeters) : null;
   const current = act ? route.steps[act.index] : null;
   const next = act ? route.steps[act.index + 1] : null;
-  const arrived = progress !== null && progress.remainingMeters < 18;
+  // Arrival needs BOTH little distance left AND standing on the route —
+  // otherwise a bad fix that projects near the route's end (desktop IP
+  // geolocation, GPS drift) would declare victory from across the campus.
+  const arrived = progress !== null && !offRoute && progress.remainingMeters < 18;
   const near = act !== null && next !== undefined && act.metersLeftInStep <= 30;
 
   // The banner leads with the NEXT manoeuvre and counts down to it; on the

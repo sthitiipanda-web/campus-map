@@ -45,6 +45,15 @@ describe("routeProgress", () => {
     );
   });
 
+  it("flags a far-away fix as off-route even when it projects onto the destination", () => {
+    // A bad fix (desktop IP geolocation) ~550m past the route's end projects
+    // onto the final vertex: remaining reads 0, so the UI must gate every
+    // "arrived" state on offRouteMeters too.
+    const p = routeProgress(route, [-0.235, 51.457])!;
+    expect(p.remainingMeters).toBe(0);
+    expect(p.offRouteMeters).toBeGreaterThan(400);
+  });
+
   it("clamps positions beyond the start to the first vertex", () => {
     const beyond = routeProgress(route, [-0.248, 51.457])!;
     const atStart = routeProgress(route, [-0.246, 51.457])!;

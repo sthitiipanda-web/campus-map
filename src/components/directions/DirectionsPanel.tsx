@@ -56,7 +56,7 @@ export function DirectionsPanel({
   const liveMeters = walking && progress ? progress.remainingMeters : route.distanceMeters;
   const liveSeconds =
     walking && progress ? progress.remainingMeters / WALK_SPEED_MPS : route.durationSeconds;
-  const nearlyThere = walking && progress !== null && progress.remainingMeters < 20;
+  const nearlyThere = walking && progress !== null && !offRoute && progress.remainingMeters < 20;
   const act = walking && progress ? activeStep(route.steps, progress.traveledMeters) : null;
 
   return (
