@@ -13,7 +13,6 @@ import { useCampusData } from "@/hooks/useCampusData";
 import { useLiveLocation } from "@/hooks/useLiveLocation";
 import { useSpeechSupported } from "@/hooks/useVoiceGuidance";
 import { CAMPUS_BBOX, type College } from "@/lib/config/campus";
-import { CHIP_GROUPS } from "@/lib/config/poi-style";
 import { pointInPolygon } from "@/lib/geo/point-in-polygon";
 import { OFF_ROUTE_METERS, routeProgress } from "@/lib/routing/progress";
 import type { RouteResponse } from "@/lib/routing/route-service";
@@ -55,7 +54,6 @@ function insideCampus([lon, lat]: [number, number]): boolean {
 export function MapShell() {
   const { pois, terrain, paths, status } = useCampusData();
   const [mode, setMode] = useState<Mode>("idle");
-  const [chip, setChip] = useState<string | null>(null);
   const [selected, setSelected] = useState<SearchablePoi | null>(null);
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
@@ -71,12 +69,15 @@ export function MapShell() {
 
   const live = useLiveLocation(walking);
 
+  // A fix outside the campus envelope is a bad fix (desktop IP geolocation,
+  // GPS drift): it must never steer the camera or the guidance. The HUD just
+  // keeps showing "waiting for GPS" until a plausible fix arrives.
+  const livePos = live.position && insideCampus(live.position) ? live.position : null;
+
   const progress = useMemo(
     () =>
-      route && live.position
-        ? routeProgress(route.geometry.coordinates as [number, number][], live.position)
-        : null,
-    [route, live.position],
+      route && livePos ? routeProgress(route.geometry.coordinates as [number, number][], livePos) : null,
+    [route, livePos],
   );
   const offRoute = progress !== null && progress.offRouteMeters > OFF_ROUTE_METERS;
 
@@ -94,20 +95,6 @@ export function MapShell() {
       })),
     };
   }, [pois]);
-
-  // Category filter chips narrow the dots on the map; search always runs
-  // over everything.
-  const filteredPoisFc = useMemo<FeatureCollection | null>(() => {
-    if (!poisFc || !chip) return poisFc;
-    const cats = CHIP_GROUPS.find((g) => g.id === chip)?.categories as string[] | undefined;
-    if (!cats) return poisFc;
-    return {
-      ...poisFc,
-      features: poisFc.features.filter(
-        (f) => typeof f.properties?.category === "string" && cats.includes(f.properties.category),
-      ),
-    };
-  }, [poisFc, chip]);
 
   // Give each building footprint its college (when a classified POI stands
   // inside it) so the map can tint it — derived from real data, not drawn.
@@ -269,12 +256,12 @@ export function MapShell() {
       <CampusMap
         selected={selected}
         route={mode === "route" ? route : null}
-        poisFc={filteredPoisFc}
+        poisFc={poisFc}
         terrainFc={terrainWithColleges}
         pathsFc={paths}
         collegeLabels={collegeLabels}
         userLocation={staticLocation}
-        livePosition={live.position}
+        livePosition={livePos}
         heading={live.heading}
         walking={walking}
         follow={follow}
@@ -301,46 +288,6 @@ export function MapShell() {
               </div>
             </div>
             <SearchBox pois={pois} status={status} onSelect={selectDestination} />
-            {pois.length > 0 && (
-              <div
-                role="group"
-                aria-label="Filter places by type"
-                className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
-              >
-                <button
-                  type="button"
-                  onClick={() => setChip(null)}
-                  aria-pressed={chip === null}
-                  className={`flex h-8 shrink-0 items-center rounded-full border px-3 text-small font-semibold shadow-sm transition-colors ${
-                    chip === null
-                      ? "border-parkland-900 bg-parkland-900 text-white"
-                      : "border-stone-300 bg-surface-raised/95 text-ink"
-                  }`}
-                >
-                  All
-                </button>
-                {CHIP_GROUPS.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => setChip((cur) => (cur === g.id ? null : g.id))}
-                    aria-pressed={chip === g.id}
-                    className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-small font-semibold shadow-sm transition-colors ${
-                      chip === g.id
-                        ? "border-parkland-900 bg-parkland-900 text-white"
-                        : "border-stone-300 bg-surface-raised/95 text-ink"
-                    }`}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="block h-2.5 w-2.5 rounded-full border border-white/70"
-                      style={{ backgroundColor: g.color }}
-                    />
-                    {g.label}
-                  </button>
-                ))}
-              </div>
-            )}
             {status === "error" && (
               <p role="alert" className="text-center text-small text-ink-muted">
                 Couldn’t load campus data — check your connection and reload.
