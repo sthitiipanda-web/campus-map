@@ -2,11 +2,16 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 import { authConfig } from "./config";
+import { isMfaRequired } from "./mfa";
 
 const credentialsSchema = z.object({
   email: z.string().email().max(254),
   password: z.string().min(1).max(200),
-  totp: z.string().regex(/^\d{6}$/),
+  totp: z
+    .string()
+    .regex(/^(\d{6})?$/)
+    .optional()
+    .default(""),
 });
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -56,8 +61,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         const passwordOk = await verifyPassword(password, user.passwordHash);
-        const totpOk =
-          user.mfaEnabled && user.mfaSecret ? await verifyTotp(totp, user.mfaSecret) : false;
+        const totpOk = !isMfaRequired()
+          ? true
+          : user.mfaEnabled && user.mfaSecret
+            ? await verifyTotp(totp, user.mfaSecret)
+            : false;
 
         if (!passwordOk || !totpOk) {
           const attempts = user.failedAttempts + 1;

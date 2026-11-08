@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 
-export function LoginForm() {
+export function LoginForm({ mfaRequired = true }: { mfaRequired?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,11 @@ export function LoginForm() {
     });
     if (res?.error) {
       // Deliberately vague: no hints about which factor failed (§9).
-      setError("Sign in failed. Check your email, password and authenticator code.");
+      setError(
+        mfaRequired
+          ? "Sign in failed. Check your email, password and authenticator code."
+          : "Sign in failed. Check your email and password.",
+      );
       return;
     }
     const callbackUrl = params.get("callbackUrl");
@@ -55,18 +59,20 @@ export function LoginForm() {
           className="h-11 rounded-(--radius-control) border border-stone-300 bg-surface px-3 text-body"
         />
       </label>
-      <label className="flex flex-col gap-1 text-small font-medium">
-        Authenticator code
-        <input
-          name="totp"
-          inputMode="numeric"
-          pattern="\d{6}"
-          maxLength={6}
-          autoComplete="one-time-code"
-          required
-          className="h-11 rounded-(--radius-control) border border-stone-300 bg-surface px-3 text-body tracking-widest"
-        />
-      </label>
+      {mfaRequired && (
+        <label className="flex flex-col gap-1 text-small font-medium">
+          Authenticator code
+          <input
+            name="totp"
+            inputMode="numeric"
+            pattern="\d{6}"
+            maxLength={6}
+            autoComplete="one-time-code"
+            required
+            className="h-11 rounded-(--radius-control) border border-stone-300 bg-surface px-3 text-body tracking-widest"
+          />
+        </label>
+      )}
       {error && (
         <p role="alert" className="text-small text-danger">
           {error}

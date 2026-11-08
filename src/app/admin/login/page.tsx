@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { LoginForm } from "./LoginForm";
+import { isMfaRequired } from "@/lib/auth/mfa";
 
 export const metadata = { title: "Admin sign in" };
 
@@ -10,7 +11,7 @@ export default function AdminLoginPage() {
         <h1 className="text-title font-semibold">Campus Navigator admin</h1>
         <p className="mt-1 text-small text-ink-muted">Staff access only. All activity is logged.</p>
         <Suspense>
-          <LoginForm />
+          <LoginForm mfaRequired={isMfaRequired()} />
         </Suspense>
       </div>
     </main>
